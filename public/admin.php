@@ -53,6 +53,7 @@ if (!Web::isAdmin()) {
     }
     echo '<section class="card"><h2>' . $t('admin.login') . '</h2><form method="post">'
         . '<input type="hidden" name="csrf" value="' . Web::e(Web::csrfToken()) . '"><input type="hidden" name="action" value="login">'
+        . '<input type="text" name="username" value="admin" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>'
         . '<div class="field"><label for="password">' . $t('setup.password') . '</label>'
         . '<input id="password" name="password" type="password" required autocomplete="current-password" autofocus></div>'
         . '<p><button class="btn" type="submit">' . $t('admin.login_btn') . '</button></p>'
@@ -165,6 +166,36 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $flash[] = ['ok', I18n::t('admin.mmsi_deleted', ['m' => $mmsi])];
                 break;
 
+            case 'photo_upload':
+                $mmsi = (int) ($_POST['photo_mmsi'] ?? 0);
+                if ($mmsi < 1 || $mmsi > 999999999) {
+                    throw new InvalidArgumentException(I18n::t('admin.invalid'));
+                }
+                $f = $_FILES['photo'] ?? null;
+                if (!is_array($f) || ($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string) $f['tmp_name'])) {
+                    throw new InvalidArgumentException(I18n::t('admin.photo_err_upload'));
+                }
+                if ((int) $f['size'] > 3 * 1024 * 1024) {
+                    throw new InvalidArgumentException(I18n::t('admin.photo_err_size'));
+                }
+                $info = @getimagesize((string) $f['tmp_name']);
+                $mime = is_array($info) ? (string) ($info['mime'] ?? '') : '';
+                if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true) || $info[0] < 16 || $info[1] < 16 || $info[0] > 12000 || $info[1] > 12000) {
+                    throw new InvalidArgumentException(I18n::t('admin.photo_err_type'));
+                }
+                $credit = trim(strip_tags((string) ($_POST['photo_credit'] ?? '')));
+                Db::run('REPLACE INTO vessel_photo (mmsi, mime, width, height, data, credit, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+                    $mmsi, $mime, min(65535, (int) $info[0]), min(65535, (int) $info[1]), (string) file_get_contents((string) $f['tmp_name']),
+                    $credit !== '' ? mb_substr($credit, 0, 255) : null, time(),
+                ]);
+                $flash[] = ['ok', I18n::t('admin.photo_saved', ['m' => $mmsi])];
+                break;
+
+            case 'photo_delete':
+                Db::run('DELETE FROM vessel_photo WHERE mmsi = ?', [(int) ($_POST['photo_mmsi'] ?? 0)]);
+                $flash[] = ['ok', I18n::t('admin.photo_deleted')];
+                break;
+
             case 'reset_data':
                 if (($_POST['confirm'] ?? '') !== 'RESET') {
                     throw new InvalidArgumentException(I18n::t('admin.reset_confirm_needed'));
@@ -208,6 +239,9 @@ $heartbeat = (int) Settings::get('worker_heartbeat');
 $dbSize = (int) Db::value('SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE()');
 $counts = Db::one("SELECT (SELECT COUNT(*) FROM vessel) vessels, (SELECT COUNT(*) FROM position) positions, (SELECT COUNT(*) FROM passage) passages");
 $zones = Db::all('SELECT * FROM zone ORDER BY name');
+$photos = Db::all('SELECT p.mmsi, p.credit, p.uploaded_at, p.width, p.height, LENGTH(p.data) AS bytes, v.name
+                   FROM vessel_photo p LEFT JOIN vessel v ON v.mmsi = p.mmsi ORDER BY p.uploaded_at DESC LIMIT 200');
+$photoMmsi = preg_match('/^\d{1,9}$/', (string) ($_GET['photo_mmsi'] ?? '')) ? (string) $_GET['photo_mmsi'] : '';
 $s = Settings::all();
 $r = (array) $s['rules'];
 $ago = static function (?int $ts) use ($now): string {
@@ -253,10 +287,10 @@ foreach ($flash as [$k, $m]) {
   <h2><?= $t('admin.ingest') ?></h2>
   <?php if ($newToken !== null): ?>
     <p class="notice ok"><?= $t('setup.done.token_once') ?></p>
-    <pre class="cmd"><?= Web::e(Page::aiscatcherCommand($newToken)) ?></pre>
+    <?= Page::aiscatcherHelp($newToken) ?>
   <?php else: ?>
     <p class="muted"><?= $t('admin.ingest_help') ?></p>
-    <pre class="cmd"><?= Web::e(Page::aiscatcherCommand(I18n::t('admin.token_placeholder'))) ?></pre>
+    <details><summary><?= $t('http.show_help') ?></summary><?= Page::aiscatcherHelp(I18n::t('admin.token_placeholder')) ?></details>
   <?php endif; ?>
   <form method="post" class="confirm" data-confirm="<?= $t('admin.token_confirm') ?>"><?= $form('token') ?>
     <button class="btn secondary" type="submit"><?= $t('admin.token_btn') ?></button></form>
@@ -364,9 +398,36 @@ foreach ($flash as [$k, $m]) {
   </form>
 </section>
 
+<section class="card" id="photos">
+  <h2><?= $t('admin.photos') ?></h2>
+  <p class="muted small"><?= $t('admin.photos_help') ?></p>
+  <form method="post" enctype="multipart/form-data"><?= $form('photo_upload') ?>
+    <div class="row">
+      <div class="field"><label for="photo_mmsi"><?= $t('admin.photo_mmsi') ?></label>
+        <input id="photo_mmsi" name="photo_mmsi" inputmode="numeric" pattern="\d{1,9}" required value="<?= Web::e($photoMmsi) ?>"></div>
+      <div class="field"><label for="photo"><?= $t('admin.photo_file') ?></label>
+        <input id="photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" required></div>
+    </div>
+    <div class="field"><label for="photo_credit"><?= $t('admin.photo_credit') ?></label>
+      <input id="photo_credit" name="photo_credit" maxlength="255" placeholder="<?= $t('admin.photo_credit_ph') ?>"></div>
+    <p><button class="btn" type="submit"><?= $t('admin.photo_add') ?></button></p>
+  </form>
+  <?php if ($photos): ?>
+    <table class="table photo-table"><tbody>
+      <?php foreach ($photos as $ph): ?>
+        <tr><td><img src="photo.php?mmsi=<?= (int) $ph['mmsi'] ?>&amp;v=<?= (int) $ph['uploaded_at'] ?>" alt="" width="72" height="48" loading="lazy"></td>
+          <td><b><?= Web::e($ph['name'] ?: 'MMSI ' . $ph['mmsi']) ?></b><span class="type"><?= (int) $ph['mmsi'] ?> · <?= (int) $ph['width'] ?>×<?= (int) $ph['height'] ?> · <?= number_format((int) $ph['bytes'] / 1024, 0, ',', ' ') ?> Ko<?= $ph['credit'] ? ' · ' . Web::e($ph['credit']) : '' ?></span></td>
+          <td class="r"><form method="post" class="confirm" data-confirm="<?= $t('admin.photo_delete_confirm') ?>"><?= $form('photo_delete') ?><input type="hidden" name="photo_mmsi" value="<?= (int) $ph['mmsi'] ?>">
+            <button class="btn danger" type="submit"><?= $t('admin.delete') ?></button></form></td></tr>
+      <?php endforeach; ?>
+    </tbody></table>
+  <?php endif; ?>
+</section>
+
 <section class="card">
   <h2><?= $t('admin.password') ?></h2>
   <form method="post"><?= $form('password') ?>
+    <input type="text" name="username" value="admin" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
     <div class="row">
       <div class="field"><label for="current"><?= $t('admin.current_password') ?></label><input id="current" name="current" type="password" required autocomplete="current-password"></div>
       <div class="field"><label for="new"><?= $t('admin.new_password') ?></label><input id="new" name="new" type="password" minlength="10" required autocomplete="new-password"></div>

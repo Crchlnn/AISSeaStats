@@ -3,7 +3,27 @@
   'use strict';
 
   var cfg = JSON.parse(document.getElementById('cfg').textContent);
-  var state = { days: 30, period: 'day', topBy: 'passages', charts: {}, maps: {} };
+  // One period drives the whole page; the vessel chart picks its granularity from it.
+  var RANGES = {
+    '2': { days: 2, period: 'hour' },
+    '7': { days: 7, period: 'day' },
+    '30': { days: 30, period: 'day' },
+    '90': { days: 90, period: 'day' },
+    '365': { days: 365, period: 'month', months: 12 },
+    'all': { days: 3650, period: 'month', months: 0 }
+  };
+  var VIEW_KEY = 'aisseastats-view';
+  var state = { range: '30', topBy: 'passages', charts: {}, maps: {}, fitRange: null };
+  try {
+    var saved = JSON.parse(localStorage.getItem(VIEW_KEY) || '{}');
+    if (saved && RANGES[saved.range]) { state.range = saved.range; }
+    if (saved && /^(passages|days|length|speed|distance)$/.test(saved.topBy || '')) { state.topBy = saved.topBy; }
+  } catch (e) { /* storage unavailable: defaults */ }
+  function saveView() {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ range: state.range, topBy: state.topBy })); } catch (e) { /* ignore */ }
+  }
+  function range() { return RANGES[state.range]; }
+  var NB = '\u00a0'; // keeps "12 NM", "2 h" on one line
 
   // ---------- helpers ----------
   function t(key, vars) {
@@ -36,11 +56,11 @@
   function nm(v) {
     if (v == null || v === '') { return '–'; }
     v = Number(v);
-    return nf1.format(v) + ' NM';
+    return nf1.format(v) + NB + 'NM';
   }
   function nmKm(v) {
     if (v == null || v === '') { return '–'; }
-    return nm(v) + ' (' + nf.format(Math.round(Number(v) * 1.852)) + ' km)';
+    return nm(v) + ' (' + nf.format(Math.round(Number(v) * 1.852)) + NB + 'km)';
   }
   function dtf(opts) { return new Intl.DateTimeFormat(locale, Object.assign({ timeZone: cfg.tz }, opts)); }
   var fmtDateTime = dtf({ day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -48,6 +68,9 @@
   var fmtHour = dtf({ hour: '2-digit', minute: '2-digit' });
   var fmtDayShort = new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', timeZone: 'UTC' });
   var fmtMonth = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+  var fmtHourNum = dtf({ hour: '2-digit', hourCycle: 'h23' });
+  var fmtDayMonth = dtf({ day: '2-digit', month: 'short' });
+  function localHour(ts) { return parseInt(fmtHourNum.format(new Date(ts * 1000)), 10) % 24; }
   function ago(ts) {
     var s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
     if (s < 60) { return t('time.seconds', { n: s }); }
@@ -126,10 +149,39 @@
     Chart.defaults.plugins.tooltip.borderWidth = 1;
     Chart.defaults.plugins.tooltip.padding = 10;
     Chart.defaults.plugins.tooltip.boxPadding = 4;
-    Chart.defaults.animation = { duration: 250 };
+    // No animations: some browsers left a re-created chart stuck on its first frame (blank bars).
+    Chart.defaults.animation = false;
   }
+  // Dashed line between 23:00 and 00:00 on the 48 h view, so the two days read apart.
+  var midnightPlugin = {
+    id: 'midnight',
+    beforeDatasetsDraw: function (chart) {
+      var idx = chart.$midnights || [];
+      if (!idx.length) { return; }
+      var x = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
+      var step = x.getPixelForValue(1) - x.getPixelForValue(0);
+      ctx.save();
+      ctx.strokeStyle = css('--text-3');
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      idx.forEach(function (i) {
+        var px = Math.round(x.getPixelForValue(i) - step / 2) + 0.5;
+        ctx.beginPath(); ctx.moveTo(px, area.top); ctx.lineTo(px, area.bottom + 6); ctx.stroke();
+      });
+      ctx.restore();
+    }
+  };
   function makeChart(id, config) {
-    if (state.charts[id]) { state.charts[id].destroy(); }
+    config.options = Object.assign({ animation: false }, config.options);
+    var existing = state.charts[id];
+    if (existing && existing.config.type === config.type) {
+      existing.data = config.data;
+      existing.options = config.options;
+      existing.update('none');
+      return existing;
+    }
+    if (existing) { existing.destroy(); }
+    config.plugins = (config.plugins || []).concat(id === 'chart-counts' ? [midnightPlugin] : []);
     state.charts[id] = new Chart($(id), config);
     return state.charts[id];
   }
@@ -165,6 +217,8 @@
   // ---------- Vessel counts ----------
   function renderCounts(data) {
     var s = data.series;
+    var narrow = $('chart-counts').parentNode.clientWidth < 620;
+    var hourStep = narrow ? 6 : 3;
     var labels = s.map(function (p) {
       if (data.period === 'hour') { return fmtHour.format(new Date(p.t * 1000)); }
       if (data.period === 'month') { return fmtMonth.format(new Date(p.t + '-01T00:00:00Z')); }
@@ -214,11 +268,27 @@
           }
         },
         scales: {
-          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+          x: data.period === 'hour' ? {
+            // Every 3 h (6 h on a phone), and the date under each midnight: 00:00 / 29 sept.
+            grid: { display: false },
+            ticks: {
+              autoSkip: false, maxRotation: 0,
+              callback: function (value, index) {
+                var p = s[index];
+                if (!p) { return null; }
+                var h = localHour(p.t);
+                if (h % hourStep !== 0) { return null; }
+                return h === 0 ? [this.getLabelForValue(value), fmtDayMonth.format(new Date(p.t * 1000))] : this.getLabelForValue(value);
+              }
+            }
+          } : { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
           y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0 }, title: { display: true, text: t('counts.axis') } }
         }
       }
     });
+    var chart = state.charts['chart-counts'];
+    chart.$midnights = data.period === 'hour' ? s.map(function (p, i) { return localHour(p.t) === 0 ? i : -1; }).filter(function (i) { return i > 0; }) : [];
+    chart.draw();
     var total = s.reduce(function (a, p) { return a + p.vessels; }, 0);
     $('counts-note').textContent = total === 0 ? t('counts.empty') : t('counts.note.' + data.period);
   }
@@ -226,7 +296,8 @@
   // ---------- Routes ----------
   function baseMap(el, opts) {
     var map = L.map(el, Object.assign({ scrollWheelZoom: false, attributionControl: true }, opts || {}));
-    L.tileLayer(cfg.tiles, { maxZoom: 18, attribution: cfg.attribution }).addTo(map);
+    // OpenStreetMap refuses tile requests without a Referer; send our origin.
+    L.tileLayer(cfg.tiles, { maxZoom: 18, attribution: cfg.attribution, referrerPolicy: 'strict-origin-when-cross-origin' }).addTo(map);
     return map;
   }
   function stationLatLng() {
@@ -278,12 +349,16 @@
       lines.push(line);
       bounds.push(a, b);
     });
-    if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [24, 24], maxZoom: 11 });
-    } else if (st) {
-      map.setView(st, 9);
-    } else {
-      map.setView([48.5, 3], 5);
+    // Re-centre only when the period changes, not on the automatic refresh (keeps the user's zoom).
+    if (state.fitRange !== state.range) {
+      state.fitRange = state.range;
+      if (bounds.length > 1) {
+        map.fitBounds(bounds, { padding: [24, 24], maxZoom: 11 });
+      } else if (st) {
+        map.setView(st, 9);
+      } else {
+        map.setView([48.5, 3], 5);
+      }
     }
     setTimeout(function () { map.invalidateSize(); }, 50);
 
@@ -292,7 +367,8 @@
       list.innerHTML = '<li class="empty">' + esc(t('routes.empty')) + '</li>';
     } else {
       list.innerHTML = routes.map(function (r, i) {
-        return '<li data-i="' + i + '"><span class="route-name">' + esc(zoneLabel(r.from)) + '<span class="arrow">→</span>' +
+        return '<li data-i="' + i + '" class="clickable" tabindex="0" role="button" data-list="route" data-from="' + esc(r.from) + '" data-to="' + esc(r.to) + '"' +
+          ' data-title="' + esc(zoneLabel(r.from) + ' → ' + zoneLabel(r.to)) + '"><span class="route-name">' + esc(zoneLabel(r.from)) + '<span class="arrow">→</span>' +
           esc(zoneLabel(r.to)) + '</span><span class="val">' + esc(t('routes.passages_n', { n: num(r.passages) })) +
           ' · ' + esc(t('routes.vessels_n', { n: num(r.vessels) })) + '</span></li>';
       }).join('');
@@ -304,7 +380,8 @@
     }
     var dest = data.destinations || [];
     $('dest-list').innerHTML = dest.length ? dest.map(function (d) {
-      return '<li><span>' + esc(d.destination) + '</span><span class="val">' + esc(t('routes.vessels_n', { n: num(d.vessels) })) + '</span></li>';
+      return '<li class="clickable" tabindex="0" role="button" data-list="dest" data-value="' + esc(d.dkey) + '" data-title="' + esc(d.destination) + '">' +
+        '<span>' + esc(d.destination) + '</span><span class="val">' + esc(t('routes.vessels_n', { n: num(d.vessels) })) + '</span></li>';
     }).join('') : '<li class="empty">' + esc(t('routes.no_dest')) + '</li>';
   }
 
@@ -319,14 +396,14 @@
       var val;
       switch (data.by) {
         case 'days': val = t('top.days_n', { n: num(v.value) }); break;
-        case 'length': val = num(v.value) + ' m'; break;
-        case 'speed': val = nf1.format(v.value) + ' kn'; break;
+        case 'length': val = num(v.value) + NB + 'm'; break;
+        case 'speed': val = nf1.format(v.value) + NB + 'kn'; break;
         case 'distance': val = nm(v.value); break;
         default: val = t('top.passages_n', { n: num(v.value) });
       }
       return '<tr><td class="rank-n">' + (i + 1) + '</td><td>' + '<span class="flag" title="' + esc(v.country || '') + '">' +
         flag(v.country) + '</span>' + vlink(v) + '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) +
-        (v.length_m ? ' · ' + num(v.length_m) + ' m' : '') + '</span></td><td class="r">' + esc(val) + '</td></tr>';
+        (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') + '</span></td><td class="r">' + esc(val) + '</td></tr>';
     }).join('');
   }
 
@@ -342,28 +419,34 @@
     }
     list.innerHTML = data.rows.map(function (v) {
       return '<li><div><span class="flag">' + flag(v.country) + '</span>' + vlink(v) + '<span class="type">' +
-        esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + ' m' : '') + '</span></div>' +
+        esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') + '</span></div>' +
         '<div class="when">' + esc(fmtDateTime.format(new Date(v.start_ts * 1000))) + '</div>' +
         '<div class="chips">' + tagChips(v.tags) + '</div></li>';
     }).join('');
   }
 
   // ---------- Fleet ----------
-  function hbar(id, labels, values, tooltipLabel) {
-    var h = Math.max(120, labels.length * 26 + 30);
-    $(id).parentNode.style.height = h + 'px';
-    makeChart(id, {
-      type: 'bar',
-      data: { labels: labels, datasets: [{ data: values, backgroundColor: css('--series-1'), borderRadius: { topRight: 4, bottomRight: 4 }, borderSkipped: 'left', maxBarThickness: 18 }] },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (i) { return ' ' + tooltipLabel(i.raw); } } } },
-        scales: {
-          x: { beginAtZero: true, border: { display: false }, ticks: { precision: 0 } },
-          y: { grid: { display: false }, border: { display: false } }
-        }
-      }
+  // HTML bars rather than a chart: labels stay readable on a phone and every row opens its vessel list.
+  function bars(el, rows) {
+    if (!rows.length) {
+      el.innerHTML = '<li class="empty">' + esc(t('top.empty')) + '</li>';
+      return;
+    }
+    var max = Math.max.apply(null, rows.map(function (r) { return r.n; }));
+    el.innerHTML = rows.map(function (r) {
+      return '<li><button type="button" class="bar-row" data-list="' + r.kind + '" data-value="' + esc(r.value) + '" data-title="' + esc(r.title) + '">' +
+        '<span class="bar-label">' + (r.flag ? '<span class="bar-flag" aria-hidden="true">' + r.flag + '</span>' : '') + esc(r.label) + '</span>' +
+        '<span class="bar-track"><span class="bar-fill"></span></span>' +
+        '<span class="bar-n">' + num(r.n) + '</span></button></li>';
+    }).join('');
+    Array.prototype.forEach.call(el.querySelectorAll('.bar-fill'), function (f, i) {
+      f.style.width = Math.max(2, rows[i].n / max * 100) + '%'; // CSSOM, allowed by the CSP
     });
+  }
+  var regionNames = null;
+  try { regionNames = new Intl.DisplayNames([locale], { type: 'region' }); } catch (e) { regionNames = null; }
+  function countryName(cc) {
+    try { return (regionNames && regionNames.of(cc)) || cc; } catch (e) { return cc; }
   }
   function renderFleet(data) {
     var cats = {};
@@ -371,15 +454,13 @@
       var k = typeCat(r.shiptype, null);
       cats[k] = (cats[k] || 0) + Number(r.vessels);
     });
-    var entries = Object.keys(cats).map(function (k) { return [k, cats[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
-    hbar('chart-types', entries.map(function (e) { return t('type.' + e[0]); }), entries.map(function (e) { return e[1]; }),
-      function (v) { return t('routes.vessels_n', { n: num(v) }); });
-    var names = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames([locale], { type: 'region' }) : null;
-    hbar('chart-flags', data.flags.map(function (f) {
-      var n = f.country;
-      try { if (names) { n = names.of(f.country) || f.country; } } catch (e) { /* unknown code */ }
-      return flag(f.country) + ' ' + n;
-    }), data.flags.map(function (f) { return Number(f.vessels); }), function (v) { return t('routes.vessels_n', { n: num(v) }); });
+    bars($('fleet-types'), Object.keys(cats).map(function (k) {
+      return { kind: 'type', value: k, label: t('type.' + k), title: t('type.' + k), n: cats[k] };
+    }).sort(function (a, b) { return b.n - a.n; }));
+    bars($('fleet-flags'), data.flags.map(function (f) {
+      var name = countryName(f.country);
+      return { kind: 'flag', value: f.country, label: name, title: flag(f.country) + ' ' + name, flag: flag(f.country), n: Number(f.vessels) };
+    }));
   }
 
   // ---------- Range polar ----------
@@ -411,7 +492,7 @@
         },
         scales: { r: { beginAtZero: true, angleLines: { color: css('--grid') }, grid: { color: css('--grid') },
           pointLabels: { color: css('--text-2'), font: { size: 12, weight: '600' } },
-          ticks: { backdropColor: 'transparent', color: css('--text-3'), callback: function (v) { return v + ' NM'; } } } }
+          ticks: { backdropColor: 'transparent', color: css('--text-3'), callback: function (v) { return v + NB + 'NM'; } } } }
       }
     });
     var maxP = Math.max.apply(null, data.period);
@@ -430,15 +511,12 @@
   function openVessel(mmsi) {
     var dlg = $('vessel-dialog');
     var body = $('vd-body');
+    body.setAttribute('data-mmsi', String(mmsi));
     body.innerHTML = '<p class="muted">' + esc(t('status.loading')) + '</p>';
     if (!dlg.open) { dlg.showModal(); }
     api('vessel', { mmsi: mmsi }).then(function (v) {
-      var photo = v.photo
-        ? '<a href="' + esc(v.photo.page) + '" target="_blank" rel="noopener"><img src="' + esc(v.photo.thumb) + '" alt="' + esc(vname(v)) + '" loading="lazy"></a>'
-        : SILHOUETTE;
-      var credit = v.photo
-        ? '<div class="vd-credit">' + esc(t('vessel.photo_credit', { a: v.photo.author || '?', l: v.photo.license || '?' })) + ' · Wikimedia Commons</div>'
-        : '<div class="vd-credit">' + esc(v.imo ? t('vessel.no_photo') : t('vessel.no_photo_imo')) + '</div>';
+      var photo = '<div class="vd-photo-wait">' + SILHOUETTE + '</div>';
+      var credit = '<div class="vd-credit" id="vd-credit">' + esc(t('vessel.photo_loading')) + '</div>';
       var facts = [
         ['MMSI', v.mmsi],
         [t('vessel.imo'), v.imo],
@@ -472,8 +550,10 @@
         (passages ? '<div class="vd-passages"><h3 class="sub">' + esc(t('vessel.recent')) + '</h3><ul>' + passages + '</ul></div>' : '') +
         '<div class="vd-links"><span class="muted">' + esc(t('vessel.more')) + '</span>' +
         '<a href="' + esc(v.links.marinetraffic) + '" target="_blank" rel="noopener">MarineTraffic</a>' +
-        '<a href="' + esc(v.links.vesselfinder) + '" target="_blank" rel="noopener">VesselFinder</a></div>';
+        '<a href="' + esc(v.links.vesselfinder) + '" target="_blank" rel="noopener">VesselFinder</a>' +
+        '<a href="' + esc(v.links.shipspotting) + '" target="_blank" rel="noopener">' + esc(t('vessel.shipspotting')) + '</a></div>';
       body.querySelector('.vd-tags').innerHTML = tagChips(v.tags);
+      loadPhoto(v);
       $('vd-close').addEventListener('click', function () { dlg.close(); });
       if (v.trace && v.trace.length) {
         var map = baseMap($('vd-map'), { zoomControl: true });
@@ -492,9 +572,79 @@
       $('vd-close').addEventListener('click', function () { dlg.close(); });
     });
   }
+  // Photo after the card is open: the free sources can take a few seconds the first time.
+  function loadPhoto(v) {
+    api('photo', { mmsi: v.mmsi }).then(function (d) {
+      var box = document.querySelector('#vd-body .vd-photo');
+      var cr = $('vd-credit');
+      if (!box || !cr || String(v.mmsi) !== String(($('vd-body').getAttribute('data-mmsi')))) { return; }
+      var p = d.photo;
+      var add = cfg.isAdmin ? ' <a href="admin.php?photo_mmsi=' + encodeURIComponent(v.mmsi) + '#photos">' + esc(p ? t('vessel.photo_replace') : t('vessel.photo_add')) + '</a>' : '';
+      if (!p) {
+        cr.innerHTML = esc(v.imo ? t('vessel.no_photo') : t('vessel.no_photo_imo')) + add;
+        return;
+      }
+      var img = '<img src="' + esc(p.thumb) + '" alt="' + esc(vname(v)) + '" loading="lazy">';
+      box.innerHTML = p.page ? '<a href="' + esc(p.page) + '" target="_blank" rel="noopener">' + img + '</a>' : img;
+      var who = p.source === 'local'
+        ? t('vessel.photo_local', { a: p.author || t('vessel.photo_station') })
+        : t('vessel.photo_credit', { a: p.author || '?', l: p.license || '?' }) + ' · ' + (p.source === 'wikidata' ? 'Wikidata / Wikimedia Commons' : 'Wikimedia Commons');
+      cr.innerHTML = esc(who) + add;
+    }).catch(function () {
+      var cr = $('vd-credit');
+      if (cr) { cr.textContent = t('vessel.no_photo_error'); }
+    });
+  }
+
   document.addEventListener('click', function (e) {
     var b = e.target.closest ? e.target.closest('.vlink') : null;
-    if (b) { openVessel(b.getAttribute('data-mmsi')); }
+    if (b) { openVessel(b.getAttribute('data-mmsi')); return; }
+    var l = e.target.closest ? e.target.closest('[data-list]') : null;
+    if (l) { openList(l); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('li[data-list]')) {
+      e.preventDefault();
+      openList(e.target);
+    }
+  });
+
+  // ---------- Vessel list (a type, a flag, a route, a destination) ----------
+  function periodLabel() { return t('range.label.' + state.range); }
+  function openList(el) {
+    var dlg = $('list-dialog');
+    var body = $('ld-body');
+    var kind = el.getAttribute('data-list');
+    var params = { by: kind, days: range().days };
+    if (kind === 'route') {
+      params.from = el.getAttribute('data-from');
+      params.to = el.getAttribute('data-to');
+    } else {
+      params.value = el.getAttribute('data-value');
+    }
+    var title = el.getAttribute('data-title');
+    body.innerHTML = '<p class="muted">' + esc(t('status.loading')) + '</p>';
+    if (!dlg.open) { dlg.showModal(); }
+    api('list', params).then(function (d) {
+      var rows = d.rows || [];
+      var head = '<div class="vd-head"><div><h2 id="ld-title">' + esc(title) + '</h2>' +
+        '<p class="muted small">' + esc(t('list.subtitle', { n: num(rows.length), p: periodLabel() })) + '</p></div>' +
+        '<button type="button" class="icon-btn ld-close" aria-label="' + esc(t('vessel.close')) + '">✕</button></div>';
+      var table = rows.length ? '<table class="table"><tbody>' + rows.map(function (v) {
+        var right = kind === 'route' ? t('top.passages_n', { n: num(v.passages) }) : fmtDateTime.format(new Date(v.last_seen * 1000));
+        return '<tr><td><span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' + vlink(v) +
+          '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') + '</span></td>' +
+          '<td class="r">' + esc(right) + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<p class="empty">' + esc(t('top.empty')) + '</p>';
+      body.innerHTML = head + table + (d.truncated ? '<p class="muted small">' + esc(t('list.truncated')) + '</p>' : '');
+      body.querySelector('.ld-close').addEventListener('click', function () { dlg.close(); });
+    }).catch(function () {
+      body.innerHTML = '<p>' + esc(t('error.load')) + '</p><button type="button" class="btn secondary ld-close">' + esc(t('vessel.close')) + '</button>';
+      body.querySelector('.ld-close').addEventListener('click', function () { dlg.close(); });
+    });
+  }
+  $('list-dialog').addEventListener('click', function (e) {
+    if (e.target === this) { this.close(); }
   });
   $('vessel-dialog').addEventListener('click', function (e) {
     if (e.target === this) { this.close(); } // click on backdrop
@@ -535,9 +685,13 @@
       onChange(b.getAttribute(attr));
     });
   }
-  segment('counts-period', 'data-period', function (v) { state.period = v; loadCounts(); });
-  segment('range-filter', 'data-days', function (v) { state.days = Number(v); loadPeriodWidgets(); });
-  segment('top-by', 'data-by', function (v) { state.topBy = v; loadTop(); });
+  function markOn(id, attr, value) {
+    Array.prototype.forEach.call($(id).querySelectorAll('button'), function (x) { x.classList.toggle('on', x.getAttribute(attr) === value); });
+  }
+  markOn('range', 'data-range', state.range);
+  markOn('top-by', 'data-by', state.topBy);
+  segment('range', 'data-range', function (v) { state.range = v; saveView(); loadCounts(); loadPeriodWidgets(); });
+  segment('top-by', 'data-by', function (v) { state.topBy = v; saveView(); loadTop(); });
 
   $('theme-toggle').addEventListener('click', function () {
     var root = document.documentElement;
@@ -554,15 +708,25 @@
   var last = {};
   function fail(id) { return function (err) { console.error(id, err); }; }
   function loadSummary() { return api('summary').then(function (d) { last.summary = d; renderSummary(d); }).catch(fail('summary')); }
-  function loadCounts() { return api('counts', { period: state.period }).then(function (d) { last.counts = d; renderCounts(d); }).catch(fail('counts')); }
-  function loadTop() { return api('top', { by: state.topBy, days: state.days }).then(function (d) { last.top = d; renderTop(d); }).catch(fail('top')); }
+  // Each answer is ignored if the period changed meanwhile (fast clicks).
+  function current(key, fn) { return function (d) { if (key === state.range) { fn(d); } }; }
+  function loadCounts() {
+    var r = range();
+    var p = { period: r.period, days: r.days };
+    if (r.months != null) { p.months = r.months; }
+    return api('counts', p).then(current(state.range, function (d) { last.counts = d; renderCounts(d); })).catch(fail('counts'));
+  }
+  function loadTop() { return api('top', { by: state.topBy, days: range().days }).then(current(state.range, function (d) { last.top = d; renderTop(d); })).catch(fail('top')); }
   function loadRemarkable() { return api('remarkable').then(function (d) { last.remarkable = d; renderRemarkable(d); }).catch(fail('remarkable')); }
   function loadPeriodWidgets() {
-    api('routes', { days: state.days }).then(function (d) { last.routes = d; renderRoutes(d); }).catch(fail('routes'));
-    api('fleet', { days: state.days }).then(function (d) { last.fleet = d; renderFleet(d); }).catch(fail('fleet'));
-    api('polar', { days: state.days }).then(function (d) { last.polar = d; renderPolar(d); }).catch(fail('polar'));
+    var k = state.range;
+    var days = range().days;
+    api('routes', { days: days }).then(current(k, function (d) { last.routes = d; renderRoutes(d); })).catch(fail('routes'));
+    api('fleet', { days: days }).then(current(k, function (d) { last.fleet = d; renderFleet(d); })).catch(fail('fleet'));
+    api('polar', { days: days }).then(current(k, function (d) { last.polar = d; renderPolar(d); })).catch(fail('polar'));
     loadTop();
   }
+  function stamp() { $('updated').textContent = t('refresh.at', { t: fmtHour.format(new Date()) }); }
   function rerender() {
     chartTheme();
     if (last.counts) { renderCounts(last.counts); }
@@ -576,10 +740,26 @@
   loadCounts();
   loadRemarkable();
   loadPeriodWidgets();
+  stamp();
+  // Status and key figures every minute, everything else every 5 minutes (skipped while the tab is hidden).
+  var ticks = 0;
   setInterval(function () {
     if (document.hidden) { return; }
+    ticks++;
     loadSummary();
-    loadRemarkable();
-    if (state.period === 'hour') { loadCounts(); }
+    if (ticks % 5 === 0) {
+      loadCounts();
+      loadRemarkable();
+      loadPeriodWidgets();
+      stamp();
+    }
   }, 60000);
+  // Catch up at once when the tab becomes visible again after a while.
+  var hiddenAt = 0;
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (hiddenAt && Date.now() - hiddenAt > 5 * 60000) {
+      loadSummary(); loadCounts(); loadRemarkable(); loadPeriodWidgets(); stamp();
+    }
+  });
 })();

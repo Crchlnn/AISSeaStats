@@ -46,4 +46,23 @@ echo "$res" | grep -q '"ok":true' || fail "ingestion rejected: $res"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api.php?q=summary")
 [ "$code" = "200" ] || fail "api summary returned $code"
 
+# Declared destinations "FR SML" and "FRSML" are merged into one row, and its vessel list has both.
+res=$(printf '{"msgs":[{"mmsi":227000101,"type":5,"shipname":"ALPHA","destination":"FR SML"},{"mmsi":227000102,"type":5,"shipname":"BRAVO","destination":"FRSML"}]}' |
+  curl -s -u "aisseastats:${ingest}" --data-binary @- "$BASE/ingest.php")
+echo "$res" | grep -q '"ok":true' || fail "ingestion of static messages rejected: $res"
+curl -s "$BASE/api.php?q=routes&days=30" | grep -q '"dkey":"FRSML","vessels":2,"destination":"FRSML"' || fail "destinations not merged"
+curl -s "$BASE/api.php?q=list&by=dest&value=FRSML&days=30" | grep -o '"mmsi":22700010[12]' | sort -u | wc -l | grep -q 2 || fail "destination list incomplete"
+curl -s "$BASE/api.php?q=list&by=flag&value=FR&days=30" | grep -q '"mmsi":227000101' || fail "flag list missing vessel"
+
+# Admin photo upload, then served by photo.php and preferred by the photo look-up.
+PNG=$(mktemp)
+echo "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGOQi1pFEmIY1TCqYfhqAAChBSIQbP1etQAAAABJRU5ErkJggg==" | base64 -d > "$PNG"
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -o /dev/null -c "$JAR" -b "$JAR" -F "csrf=$token" -F action=photo_upload -F photo_mmsi=227000101 \
+  -F "photo=@${PNG};type=image/png" -F "photo_credit=CI test" "$BASE/admin.php"
+rm -f "$PNG"
+ctype=$(curl -s -o /dev/null -w '%{content_type}' "$BASE/photo.php?mmsi=227000101")
+[ "$ctype" = "image/png" ] || fail "uploaded photo not served ($ctype)"
+curl -s "$BASE/api.php?q=photo&mmsi=227000101" | grep -q '"source":"local"' || fail "local photo not used"
+
 echo "smoke test passed"

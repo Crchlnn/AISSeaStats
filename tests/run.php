@@ -80,6 +80,21 @@ check('watchlist by MMSI', in_array('watchlist', Rules::tagsFor($v, $r, ['FR' =>
 $r['military_prefixes'] = ['2270'];
 check('military prefix', in_array('military', Rules::tagsFor($v, $r, ['FR' => 50]), true));
 
+// Photo sources: parsing of the documented Wikimedia / Wikidata answers.
+$commons = ['query' => ['pages' => [['imageinfo' => [[
+    'mime' => 'image/jpeg', 'thumburl' => 'https://upload.wikimedia.org/x/640px-Ship.jpg',
+    'descriptionurl' => 'https://commons.wikimedia.org/wiki/File:Ship.jpg',
+    'extmetadata' => ['Artist' => ['value' => '<a href="#">Jane Doe</a>'], 'LicenseShortName' => ['value' => 'CC BY-SA 4.0']],
+]]]]]];
+$pi = AISSeaStats\Enrich::parseImageInfo($commons, 'commons');
+check('commons imageinfo parsed', $pi !== null && $pi['author'] === 'Jane Doe' && $pi['license'] === 'CC BY-SA 4.0' && str_starts_with($pi['thumb'], 'https://upload.wikimedia.org/'));
+$bad = $commons; $bad['query']['pages'][0]['imageinfo'][0]['thumburl'] = 'https://evil.example/x.jpg';
+check('foreign image host rejected', AISSeaStats\Enrich::parseImageInfo($bad, 'commons') === null);
+check('wikidata search qid', AISSeaStats\Enrich::parseSearchQid(['query' => ['search' => [['title' => 'Q12345']]]]) === 'Q12345');
+check('wikidata search empty', AISSeaStats\Enrich::parseSearchQid(['query' => ['search' => []]]) === null);
+check('wikidata P18 claim', AISSeaStats\Enrich::parseImageClaim(['claims' => ['P18' => [['mainsnak' => ['datavalue' => ['value' => 'Ship.jpg']]]]]]) === 'Ship.jpg');
+check('wikidata P18 path rejected', AISSeaStats\Enrich::parseImageClaim(['claims' => ['P18' => [['mainsnak' => ['datavalue' => ['value' => '../x.jpg']]]]]]) === null);
+
 // Integration (database)
 if (getenv('DB_HOST')) {
     Db::waitReady(60);
@@ -119,6 +134,30 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     // A new message after the gap starts a second passage.
     (new Ingest($now + 4 * 3600))->process([['mmsi' => 244030470, 'type' => 1, 'rxuxtime' => $now + 4 * 3600, 'lat' => 51.87, 'lon' => 4.50]]);
     check('second passage after gap', (int) Db::value('SELECT passages FROM vessel WHERE mmsi = 244030470') === 2);
+    // Photos: Commons empty for the IMO, then Wikidata by IMO finds an image.
+    AISSeaStats\Db::pdo()->exec('TRUNCATE TABLE photo_lookup');
+    AISSeaStats\Db::pdo()->exec('TRUNCATE TABLE vessel_photo');
+    $calls = [];
+    AISSeaStats\Enrich::$http = static function (string $url) use (&$calls, $commons): string {
+        $calls[] = $url;
+        if (str_contains($url, 'gcmtitle=Category%3AIMO')) { return '{"query":{"pages":[]}}'; }
+        if (str_contains($url, 'haswbstatement%3AP458%3D9074729')) { return '{"query":{"search":[{"title":"Q42"}]}}'; }
+        if (str_contains($url, 'wbgetclaims')) { return '{"claims":{"P18":[{"mainsnak":{"datavalue":{"value":"Ship.jpg"}}}]}}'; }
+        if (str_contains($url, 'titles=File%3AShip.jpg')) { return json_encode($commons); }
+        return '{}';
+    };
+    $ph = AISSeaStats\Enrich::photo(244030470, 9074729);
+    check('photo via wikidata', $ph !== null && $ph['source'] === 'wikidata' && count($calls) === 4);
+    $n = count($calls);
+    $ph = AISSeaStats\Enrich::photo(244030470, 9074729);
+    check('photo cached', $ph !== null && count($calls) === $n);
+    AISSeaStats\Enrich::$http = static fn (string $url): false => false;
+    check('network error: no photo, no crash', AISSeaStats\Enrich::photo(211000001, null) === null);
+    AISSeaStats\Db::run('INSERT INTO vessel_photo (mmsi, mime, width, height, data, credit, uploaded_at) VALUES (?,?,?,?,?,?,?)',
+        [244030470, 'image/png', 16, 16, 'x', 'Me', 1]);
+    $ph = AISSeaStats\Enrich::photo(244030470, 9074729);
+    check('local photo has priority', $ph !== null && $ph['source'] === 'local' && $ph['author'] === 'Me');
+    AISSeaStats\Enrich::$http = null;
 }
 
 echo "{$pass} passed, {$fail} failed\n";

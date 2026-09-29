@@ -32,13 +32,29 @@ $today = (new DateTimeImmutable('@' . $now))->setTimezone($tz)->setTime(0, 0);
 $sinceDay = $today->modify('-' . ($days - 1) . ' days');
 $sinceTs = $sinceDay->getTimestamp();
 const INFRA = "('BASE','ATON')";
+const DEST_KEY = "REGEXP_REPLACE(UPPER(TRIM(destination)), '[^A-Z0-9]', '')";
+const TYPE_CATS = [
+    'cargo' => 'shiptype BETWEEN 70 AND 79',
+    'tanker' => 'shiptype BETWEEN 80 AND 89',
+    'passenger' => 'shiptype BETWEEN 60 AND 69',
+    'hsc' => 'shiptype BETWEEN 40 AND 49',
+    'fishing' => 'shiptype = 30',
+    'tug' => 'shiptype IN (31, 32, 52)',
+    'sailing' => 'shiptype = 36',
+    'pleasure' => 'shiptype = 37',
+    'military' => 'shiptype = 35',
+    'pilot' => 'shiptype = 50',
+    'authority' => 'shiptype IN (51, 55, 58)',
+    'service' => 'shiptype IN (33, 34, 53, 54)',
+    'unknown' => '(shiptype IS NULL OR shiptype = 0)',
+];
 
 try {
     switch ($q) {
         case 'summary':
             Web::json(summary($today, $now), 200, 20);
         case 'counts':
-            Web::json(counts((string) ($_GET['period'] ?? 'day'), $today, $now), 200, 60);
+            Web::json(counts((string) ($_GET['period'] ?? 'day'), $today, $now, $days, (int) ($_GET['months'] ?? 24)), 200, 60);
         case 'routes':
             Web::json(routes($sinceTs), 200, 60);
         case 'top':
@@ -51,6 +67,10 @@ try {
             Web::json(polar($sinceDay), 200, 60);
         case 'vessel':
             Web::json(vessel((int) ($_GET['mmsi'] ?? 0)), 200, 30);
+        case 'photo':
+            Web::json(photo((int) ($_GET['mmsi'] ?? 0)), 200, 300);
+        case 'list':
+            Web::json(vesselList((string) ($_GET['by'] ?? ''), $sinceDay, $sinceTs), 200, 30);
         case 'search':
             Web::json(search((string) ($_GET['s'] ?? '')), 200, 10);
         default:
@@ -97,7 +117,7 @@ function summary(DateTimeImmutable $today, int $now): array
 }
 
 /** @return array<string, mixed> */
-function counts(string $period, DateTimeImmutable $today, int $now): array
+function counts(string $period, DateTimeImmutable $today, int $now, int $days = 90, int $months = 24): array
 {
     $out = [];
     if ($period === 'hour') {
@@ -112,7 +132,17 @@ function counts(string $period, DateTimeImmutable $today, int $now): array
         return ['period' => 'hour', 'series' => $out];
     }
     if ($period === 'month') {
-        $from = $today->modify('first day of this month')->modify('-23 months');
+        if ($months <= 0) {
+            // "All": from the first month with data (at least 12 months shown).
+            $first = (string) (Db::value('SELECT MIN(day) FROM vessel_daily') ?? $today->format('Y-m-d'));
+            $from = (new DateTimeImmutable($first, $today->getTimezone()))->modify('first day of this month');
+            $floor = $today->modify('first day of this month')->modify('-11 months');
+            if ($from > $floor) {
+                $from = $floor;
+            }
+        } else {
+            $from = $today->modify('first day of this month')->modify('-' . (min(120, $months) - 1) . ' months');
+        }
         $v = [];
         foreach (Db::all("SELECT DATE_FORMAT(day, '%Y-%m') m, COUNT(DISTINCT mmsi) c FROM vessel_daily
                           WHERE day >= ? GROUP BY m", [$from->format('Y-m-d')]) as $r) {
@@ -129,7 +159,7 @@ function counts(string $period, DateTimeImmutable $today, int $now): array
         }
         return ['period' => 'month', 'series' => trim_leading($out)];
     }
-    $from = $today->modify('-89 days');
+    $from = $today->modify('-' . (max(7, min(366, $days)) - 1) . ' days');
     $rows = [];
     foreach (Db::all('SELECT day, vessels, msgs, new_vessels, max_dist_nm FROM stats_daily WHERE day >= ?', [$from->format('Y-m-d')]) as $r) {
         $rows[(string) $r['day']] = $r;
@@ -169,9 +199,16 @@ function routes(int $sinceTs): array
         FROM passage
         WHERE closed = 1 AND start_ts >= ? AND moved_nm >= 0.5 AND entry_zone IS NOT NULL AND exit_zone IS NOT NULL
         GROUP BY entry_zone, exit_zone ORDER BY passages DESC LIMIT 10", [$sinceTs]);
-    $dest = Db::all("SELECT UPPER(destination) AS destination, COUNT(*) AS vessels FROM vessel
+    // "FR SML", "FRSML" and "fr-sml" are the same destination: group on letters and digits only.
+    $dest = Db::all("SELECT " . DEST_KEY . " AS dkey, MAX(UPPER(TRIM(destination))) AS label, COUNT(*) AS vessels FROM vessel
         WHERE last_seen >= ? AND destination IS NOT NULL AND destination <> ''
-        GROUP BY UPPER(destination) ORDER BY vessels DESC LIMIT 10", [$sinceTs]);
+        GROUP BY dkey HAVING dkey <> '' ORDER BY vessels DESC, dkey LIMIT 10", [$sinceTs]);
+    foreach ($dest as &$d) {
+        // A UN/LOCODE (2 letters + 3 characters) reads best without spaces.
+        $d['destination'] = preg_match('/^[A-Z]{2}[A-Z0-9]{3}$/', (string) $d['dkey']) ? $d['dkey'] : $d['label'];
+        unset($d['label']);
+    }
+    unset($d);
     return ['routes' => $routes, 'destinations' => $dest];
 }
 
@@ -270,18 +307,26 @@ function vessel(int $mmsi): array
         }
     }
     $v['trace'] = $trace;
-    $photo = null;
-    try {
-        $photo = Enrich::photo($v['imo'] !== null ? (int) $v['imo'] : null);
-    } catch (Throwable $e) {
-        error_log('[aisseastats] photo lookup failed: ' . $e->getMessage());
-    }
-    $v['photo'] = $photo;
+    $v['has_local_photo'] = (bool) Db::value('SELECT 1 FROM vessel_photo WHERE mmsi = ?', [$mmsi]);
+    // Links only: these sites do not allow their photos to be fetched automatically.
     $v['links'] = [
         'marinetraffic' => 'https://www.marinetraffic.com/en/ais/details/ships/mmsi:' . $mmsi,
         'vesselfinder' => 'https://www.vesselfinder.com/vessels/details/' . ($v['imo'] ?: $mmsi),
+        'shipspotting' => 'https://www.shipspotting.com/photos/gallery?' . ($v['imo'] ? 'search_imo=' . (int) $v['imo'] : 'search_mmsi=' . $mmsi),
     ];
     return $v;
+}
+
+/** Photo looked up separately so that the vessel card opens at once. @return array<string, mixed> */
+function photo(int $mmsi): array
+{
+    $imo = Db::value('SELECT imo FROM vessel WHERE mmsi = ?', [$mmsi]);
+    try {
+        return ['photo' => Enrich::photo($mmsi, $imo !== null ? (int) $imo : null)];
+    } catch (Throwable $e) {
+        error_log('[aisseastats] photo lookup failed: ' . $e->getMessage());
+        return ['photo' => null];
+    }
 }
 
 /** @return array<int, array<string, mixed>> */
@@ -296,4 +341,52 @@ function search(string $s): array
     }
     $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $s) . '%';
     return Db::all('SELECT mmsi, name, shiptype, country FROM vessel WHERE name LIKE ? ORDER BY last_seen DESC LIMIT 10', [$like]);
+}
+
+/**
+ * Vessels behind one bar or row of the page: a ship type category, a flag,
+ * a route (entry -> exit zone) or a declared destination, over the selected period.
+ * @return array<string, mixed>
+ */
+function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): array
+{
+    $cols = 'v.mmsi, v.name, v.shiptype, v.vclass, v.country, v.length_m, v.tags, v.last_seen';
+    switch ($by) {
+        case 'type':
+            $cat = (string) ($_GET['value'] ?? '');
+            if ($cat === 'other') {
+                $known = implode(' OR ', array_map(static fn ($w) => '(' . $w . ')', array_values(TYPE_CATS)));
+                $where = "NOT ({$known})";
+            } elseif (isset(TYPE_CATS[$cat])) {
+                $where = TYPE_CATS[$cat];
+            } else {
+                Web::json(['error' => 'unknown type'], 400);
+            }
+            $rows = Db::all("SELECT {$cols} FROM vessel v WHERE v.last_seen >= ? AND v.vclass NOT IN " . INFRA
+                . " AND {$where} ORDER BY v.last_seen DESC LIMIT 300", [$sinceTs]);
+            break;
+        case 'flag':
+            $cc = strtoupper((string) ($_GET['value'] ?? ''));
+            if (!preg_match('/^[A-Z]{2}$/', $cc)) {
+                Web::json(['error' => 'bad flag'], 400);
+            }
+            $rows = Db::all("SELECT {$cols} FROM vessel v WHERE v.last_seen >= ? AND v.vclass NOT IN " . INFRA
+                . ' AND v.country = ? ORDER BY v.last_seen DESC LIMIT 300', [$sinceTs, $cc]);
+            break;
+        case 'route':
+            $rows = Db::all("SELECT {$cols}, COUNT(*) AS passages, MAX(p.start_ts) AS last_passage
+                FROM passage p JOIN vessel v ON v.mmsi = p.mmsi
+                WHERE p.closed = 1 AND p.start_ts >= ? AND p.moved_nm >= 0.5 AND p.entry_zone = ? AND p.exit_zone = ?
+                GROUP BY p.mmsi ORDER BY passages DESC, last_passage DESC LIMIT 300",
+                [$sinceTs, mb_substr((string) ($_GET['from'] ?? ''), 0, 48), mb_substr((string) ($_GET['to'] ?? ''), 0, 48)]);
+            break;
+        case 'dest':
+            $key = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['value'] ?? '')));
+            $rows = Db::all("SELECT {$cols}, v.destination FROM vessel v WHERE v.last_seen >= ? AND " . DEST_KEY
+                . ' = ? ORDER BY v.last_seen DESC LIMIT 300', [$sinceTs, $key]);
+            break;
+        default:
+            Web::json(['error' => 'unknown list'], 400);
+    }
+    return ['by' => $by, 'rows' => $rows, 'truncated' => count($rows) >= 300];
 }

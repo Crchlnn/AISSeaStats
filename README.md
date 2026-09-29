@@ -68,20 +68,49 @@ cd AISSeaStats
 2. the time zone and language,
 3. an admin password.
 
-It then shows your **ingestion token** and the line to add to AIS-catcher.
+If AIS-catcher runs in managed mode, the wizard can pre-fill the name and position from its `config.json` (read in your browser, never uploaded). It then shows your **ingestion token** and how to fill AIS-catcher's HTTP output.
 
 Manual alternative: `cp .env.example .env`, edit the passwords, then `docker compose up -d --build`.
 
 ## Connect AIS-catcher
 
-Command line or service configuration:
+### Managed mode (web interface)
+
+In AIS-catcher: **Output → HTTP → add an output**, then:
+
+| AIS-catcher field | Value |
+| --- | --- |
+| Description | anything, e.g. `AISSeaStats` |
+| Link | empty |
+| URL | `http://<pi-address>:8095/ingest.php` |
+| Interval | `15` |
+| ID | optional: station name, shown in the ingestion log |
+| Credentials | `aisseastats:<token>` |
+| Protocol | `AISCATCHER` (the default) |
+| Gzip | on |
+| Response | either way (on shows AISSeaStats' reply in the AIS-catcher log) |
+| Unique / Downsample Position | off |
+
+Keep **Active** on and **save with the floppy-disk icon** at the top right: while "You have unsaved changes" shows, nothing is applied.
+
+### Command line or service
+
+Add these options to your existing AIS-catcher command (do not run the line on its own):
 
 ```
-AIS-catcher ... -M DTM -H http://<pi-address>:8095/ingest.php interval 15 gzip on userpwd aisseastats:<token> id MyStation
+-M DTM -H http://<pi-address>:8095/ingest.php interval 15 gzip on userpwd aisseastats:<token> id MyStation
 ```
 
-- `-M DTM` adds signal level, reception time and flag country to each message. Without it, the flag is derived from the MMSI and signal levels are not recorded.
-- In AIS-catcher's managed mode (web interface), add an **HTTP output** with the same URL, `userpwd`, interval 15 and gzip on.
+`-M DTM` adds signal level, reception time and flag country to each message. Without it, the flag is derived from the MMSI and signal levels are not recorded.
+
+### Which address?
+
+AIS-catcher usually runs in its own Docker container, so `localhost` and `127.0.0.1` point to that container, not to AISSeaStats. Use:
+
+- the Pi's IP address, e.g. `http://192.168.1.20:8095/ingest.php`, or
+- its name from your local DNS (Pi-hole, router), **without `.local`**, e.g. `http://mypi:8095/ingest.php`.
+
+Names ending in `.local` (mDNS/Bonjour) usually work in a browser but not inside Docker containers.
 
 The first figures appear within a minute. Routes appear once vessels have left your coverage for 2 hours.
 
@@ -92,27 +121,60 @@ docker compose exec app php bin/simulate.php --hours 72      # 72 h of fake traf
 docker compose exec app php bin/reset-data.php --yes          # remove it before real use
 ```
 
+## Upgrade
+
+Your statistics are kept: they live in the Docker volume `aisseastats_db-data`, and your settings in the database and in `.env`, none of which Git or the upgrade touch. Database changes are applied automatically when the app starts.
+
+```sh
+cd AISSeaStats                       # the folder you installed from
+git pull                             # get the new version
+docker compose up -d --build         # rebuild and restart (a few seconds to a minute)
+```
+
+Then reload the page (Ctrl+F5 / Cmd+Shift+R if the look did not change). Check the version at the bottom of the page and what changed in [CHANGELOG.md](CHANGELOG.md).
+
+- **Backup first, if you want to be safe** (see the table below): an upgrade does not delete data, but a backup costs nothing.
+- **`git pull` refuses to run** ("your local changes would be overwritten"): you edited a tracked file. `git stash`, then `git pull`, then `git stash pop` if you want your change back; your data is not affected.
+- **Going back to a previous version**: `git checkout v1.0.0-beta.3` (for example), then `docker compose up -d --build`. Database changes are not rolled back, so prefer restoring a backup taken before the upgrade.
+- Only `docker compose down -v` deletes the data (the `-v` removes the volume).
+
 ## Everyday commands
 
 | Task | Command |
 | --- | --- |
-| Update | `git pull && docker compose up -d --build` |
+| Upgrade | `git pull && docker compose up -d --build` |
 | Logs | `docker compose logs -f app worker` |
 | Status | `docker compose ps` |
 | Lost admin password | `docker compose exec app php bin/reset-admin.php` |
 | Backup | `docker compose exec db sh -c 'mariadb-dump -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats' \| gzip > aisseastats.sql.gz` |
+| Restore a backup | `gunzip -c aisseastats.sql.gz \| docker compose exec -T db sh -c 'mariadb -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats'` |
 | Uninstall (keeps data) | `docker compose down` |
 | Uninstall and delete data | `docker compose down -v` |
 
 ## Admin page
 
-`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, token rotation, password, deletion of one vessel's data (GDPR requests) or of everything.
+`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, vessel photos, token rotation, password, deletion of one vessel's data (GDPR requests) or of everything.
 
 **Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`SW → NE`). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
 
 ## Photos
 
-Photos come from [Wikimedia Commons](https://commons.wikimedia.org/), looked up by IMO number (Commons files are categorised as `IMO nnnnnnn`), shown with author and licence, and cached 30 days. Vessels without an IMO number (many inland and pleasure craft) get a silhouette. MarineTraffic and similar services are linked, not scraped: their terms do not allow it. The lookup is the only outbound call and can be turned off in the admin.
+The vessel card shows, in this order:
+
+1. **your own photo**, added in the admin page (Vessel photos) or from the card's "Add a photo" link when signed in as admin; it is stored in the database;
+2. a free photo from [Wikimedia Commons](https://commons.wikimedia.org/), found by IMO number (files categorised `IMO nnnnnnn`);
+3. the image of the matching [Wikidata](https://www.wikidata.org/) item, found by IMO number (P458) or MMSI (P587).
+
+Free photos are shown with author and licence and cached 30 days. Many fishing boats and pleasure craft have no free photo anywhere: they get a silhouette, and you can add yours. MarineTraffic, VesselFinder and ShipSpotting are **linked, never fetched**: their terms do not allow automated reuse of their photos. The Wikimedia/Wikidata look-up is the only outbound call and can be turned off in the admin.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| "Waiting for the first data from AIS-catcher" | Check the HTTP output is **saved** and **Active** in AIS-catcher, and that its URL uses the Pi's IP or DNS name (not `localhost`, not `.local`). The admin page shows the last batch received and the last error. |
+| Admin shows "token rejected" | The credentials in AIS-catcher do not match: generate a new token in the admin and paste `aisseastats:<token>` again. |
+| Map tiles show "Access blocked" | Upgrade to 1.0.0-beta.4 or later (the page now sends the Referer that OpenStreetMap requires), or set another tile server in the admin. |
+| A chart stays empty after switching period | Upgrade to 1.0.0-beta.4 or later, then reload the page. |
 
 ## Security and privacy
 

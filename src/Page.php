@@ -52,6 +52,50 @@ final class Page
             . $token . ' id ' . $station;
     }
 
+    /** True when the page was opened through an mDNS name (host.local). */
+    public static function hostIsMdns(): bool
+    {
+        $host = strtolower((string) preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? '')));
+        return str_ends_with($host, '.local');
+    }
+
+    /**
+     * How to fill AIS-catcher's HTTP output, field by field (managed mode),
+     * plus the command-line variant. $token is shown in clear only right after it is created.
+     */
+    public static function aiscatcherHelp(string $token): string
+    {
+        $e = static fn (string $k, array $v = []): string => Web::e(I18n::t($k, $v));
+        $rows = [
+            ['Description', I18n::t('http.desc')],
+            ['Link', I18n::t('http.link')],
+            ['URL', self::ingestUrl()],
+            ['Interval', '15'],
+            ['ID', I18n::t('http.id')],
+            ['Credentials', 'aisseastats:' . $token],
+            ['Protocol', 'AISCATCHER'],
+            ['Gzip', I18n::t('http.on')],
+            ['Response', I18n::t('http.response')],
+            ['Unique / Downsample Position', I18n::t('http.filters')],
+        ];
+        $html = '<h3 class="sub">' . $e('http.managed_title') . '</h3>'
+            . '<p>' . $e('http.managed_intro') . '</p>'
+            . '<table class="table http-fields"><thead><tr><th>' . $e('http.field') . '</th><th>' . $e('http.value') . '</th></tr></thead><tbody>';
+        foreach ($rows as [$field, $value]) {
+            $mono = in_array($field, ['URL', 'Interval', 'Credentials', 'Protocol'], true);
+            $html .= '<tr><td>' . Web::e($field) . '</td><td>' . ($mono ? '<code>' . Web::e($value) . '</code>' : Web::e($value)) . '</td></tr>';
+        }
+        $html .= '</tbody></table>'
+            . '<p class="muted small">' . $e('http.save') . '</p>';
+        if (self::hostIsMdns()) {
+            $html .= '<p class="notice err">' . $e('http.mdns_warning') . '</p>';
+        }
+        $html .= '<h3 class="sub">' . $e('setup.done.cli') . '</h3>'
+            . '<pre class="cmd">' . Web::e(self::aiscatcherCommand($token)) . '</pre>'
+            . '<p class="muted small">' . $e('setup.done.meta') . '</p>';
+        return $html;
+    }
+
     public static function newToken(): string
     {
         $token = rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');

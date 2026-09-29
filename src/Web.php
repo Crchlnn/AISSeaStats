@@ -9,7 +9,8 @@ final class Web
     public static function headers(bool $html = true): void
     {
         header('X-Content-Type-Options: nosniff');
-        header('Referrer-Policy: same-origin');
+        // OpenStreetMap blocks tile requests that carry no Referer: send our origin only (never the path).
+        header('Referrer-Policy: strict-origin-when-cross-origin');
         header('X-Frame-Options: SAMEORIGIN');
         header('Permissions-Policy: geolocation=(), camera=(), microphone=()');
         if ($html) {

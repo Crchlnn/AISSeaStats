@@ -15,6 +15,7 @@ try {
     http_response_code(503);
     exit('Database unavailable. Check that the "db" container is running.');
 }
+Web::session();
 Web::headers();
 
 $cfg = [
@@ -29,6 +30,7 @@ $cfg = [
     'tiles' => Settings::get('map_tiles'),
     'attribution' => Settings::get('map_attribution'),
     'version' => VERSION,
+    'isAdmin' => Web::isAdmin(),
 ];
 $t = static fn (string $k): string => Web::e(I18n::t($k));
 ?>
@@ -70,29 +72,26 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
 <main>
   <section class="kpis" id="kpis" aria-label="<?= $t('kpi.title') ?>"></section>
 
+  <div class="filter-row sticky-filter">
+    <span class="muted"><?= $t('filter.period') ?></span>
+    <div class="seg" id="range" role="group" aria-label="<?= $t('filter.period') ?>">
+      <button type="button" data-range="2"><?= $t('range.48h') ?></button>
+      <button type="button" data-range="7"><?= $t('range.7d') ?></button>
+      <button type="button" data-range="30" class="on"><?= $t('range.30d') ?></button>
+      <button type="button" data-range="90"><?= $t('range.90d') ?></button>
+      <button type="button" data-range="365"><?= $t('range.1y') ?></button>
+      <button type="button" data-range="all"><?= $t('filter.all') ?></button>
+    </div>
+    <span class="muted small" id="updated" aria-live="polite"></span>
+  </div>
+
   <section class="card">
     <div class="card-head">
       <h2><?= $t('counts.title') ?></h2>
-      <div class="seg" role="tablist" id="counts-period">
-        <button type="button" data-period="hour"><?= $t('counts.48h') ?></button>
-        <button type="button" data-period="day" class="on"><?= $t('counts.90d') ?></button>
-        <button type="button" data-period="month"><?= $t('counts.24m') ?></button>
-      </div>
+      <span class="muted small" id="counts-note"></span>
     </div>
     <div class="chart-wrap tall"><canvas id="chart-counts" role="img" aria-label="<?= $t('counts.title') ?>"></canvas></div>
-    <p class="muted small" id="counts-note"></p>
   </section>
-
-  <div class="filter-row">
-    <span class="muted"><?= $t('filter.period') ?></span>
-    <div class="seg" id="range-filter">
-      <button type="button" data-days="7">7 <?= $t('unit.d') ?></button>
-      <button type="button" data-days="30" class="on">30 <?= $t('unit.d') ?></button>
-      <button type="button" data-days="90">90 <?= $t('unit.d') ?></button>
-      <button type="button" data-days="365">1 <?= $t('unit.y') ?></button>
-      <button type="button" data-days="3650"><?= $t('filter.all') ?></button>
-    </div>
-  </div>
 
   <section class="card">
     <div class="card-head">
@@ -138,9 +137,10 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
     <section class="card">
       <div class="card-head"><h2><?= $t('fleet.title') ?></h2></div>
       <h3 class="sub"><?= $t('fleet.types') ?></h3>
-      <div class="chart-wrap"><canvas id="chart-types" role="img" aria-label="<?= $t('fleet.types') ?>"></canvas></div>
+      <ul class="bars" id="fleet-types"></ul>
       <h3 class="sub"><?= $t('fleet.flags') ?></h3>
-      <div class="chart-wrap"><canvas id="chart-flags" role="img" aria-label="<?= $t('fleet.flags') ?>"></canvas></div>
+      <ul class="bars flags" id="fleet-flags"></ul>
+      <p class="muted small"><?= $t('fleet.hint') ?></p>
     </section>
 
     <section class="card">
@@ -156,6 +156,10 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
   <span><?= $t('footer.data') ?></span>
   <a href="https://github.com/Crchlnn/AISSeaStats" rel="noopener">GitHub</a>
 </footer>
+
+<dialog id="list-dialog" class="vessel-dialog" aria-labelledby="ld-title">
+  <div class="vd-inner" id="ld-body"></div>
+</dialog>
 
 <dialog id="vessel-dialog" class="vessel-dialog" aria-labelledby="vd-title">
   <div class="vd-inner" id="vd-body"></div>

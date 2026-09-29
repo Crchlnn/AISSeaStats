@@ -43,13 +43,64 @@ Ouvrez ensuite `http://<ip-du-pi>:8095`. L'assistant demande le nom et la positi
 
 ## Brancher AIS-catcher
 
+### Mode « managed » (interface web)
+
+Dans AIS-catcher : **Output → HTTP → ajouter une sortie**, puis :
+
+| Champ AIS-catcher | Valeur |
+| --- | --- |
+| Description | libre, par ex. `AISSeaStats` |
+| Link | vide |
+| URL | `http://<ip-du-pi>:8095/ingest.php` |
+| Interval | `15` |
+| ID | facultatif : nom de la station, visible dans le journal d'ingestion |
+| Credentials | `aisseastats:<jeton>` |
+| Protocol | `AISCATCHER` (valeur par défaut) |
+| Gzip | activé |
+| Response | au choix (activé : la réponse d'AISSeaStats apparaît dans le journal d'AIS-catcher) |
+| Unique / Downsample Position | désactivés |
+
+Laissez **Active** coché et **enregistrez avec l'icône de disquette** en haut à droite : tant que « You have unsaved changes » est affiché, rien n'est pris en compte.
+
+L'assistant peut aussi pré-remplir le nom et la position de la station depuis le `config.json` d'AIS-catcher (lu dans le navigateur, jamais envoyé).
+
+### Ligne de commande ou service
+
+Ajoutez ces options à votre commande AIS-catcher existante (ne lancez pas la ligne seule) :
+
 ```
-AIS-catcher ... -M DTM -H http://<ip-du-pi>:8095/ingest.php interval 15 gzip on userpwd aisseastats:<jeton> id MaStation
+-M DTM -H http://<ip-du-pi>:8095/ingest.php interval 15 gzip on userpwd aisseastats:<jeton> id MaStation
 ```
 
-En mode « managed », ajoutez une **sortie HTTP** avec la même URL, `userpwd`, intervalle 15 et gzip activé. Gardez `-M DTM` (signal, horodatage, pays du pavillon) : sans lui, le pavillon est déduit du MMSI et le niveau de signal n'est pas enregistré.
+Gardez `-M DTM` (signal, horodatage, pays du pavillon) : sans lui, le pavillon est déduit du MMSI et le niveau de signal n'est pas enregistré.
+
+### Quelle adresse mettre ?
+
+AIS-catcher tourne en général dans son propre conteneur Docker : `localhost` et `127.0.0.1` y désignent ce conteneur, pas AISSeaStats. Utilisez :
+
+- l'adresse IP du Pi, par ex. `http://192.168.1.20:8095/ingest.php`, ou
+- son nom dans votre DNS local (Pi-hole, box), **sans `.local`**, par ex. `http://monpi:8095/ingest.php`.
+
+Les noms en `.local` (mDNS/Bonjour) marchent souvent dans le navigateur, mais pas depuis un conteneur Docker.
 
 Les premiers chiffres arrivent dans la minute. Les routes apparaissent quand un navire a quitté la zone de réception depuis 2 h.
+
+## Mettre à jour
+
+Vos statistiques sont conservées : elles sont dans le volume Docker `aisseastats_db-data`, et vos réglages dans la base et dans `.env`, que ni Git ni la mise à jour ne touchent. Les évolutions de la base s'appliquent automatiquement au démarrage.
+
+```sh
+cd AISSeaStats                       # le dossier d'installation
+git pull                             # récupère la nouvelle version
+docker compose up -d --build         # reconstruit et redémarre (quelques secondes à une minute)
+```
+
+Rechargez ensuite la page (Ctrl+F5 / Cmd+Maj+R si l'affichage n'a pas changé). La version figure en bas de page, les nouveautés dans [CHANGELOG.md](../CHANGELOG.md).
+
+- **Par prudence, faites une sauvegarde avant** (commande ci-dessous) : la mise à jour ne supprime rien, mais une sauvegarde ne coûte rien.
+- **`git pull` refuse** (« your local changes would be overwritten ») : vous avez modifié un fichier suivi. `git stash`, puis `git pull`, puis `git stash pop` pour récupérer votre modification ; vos données ne sont pas concernées.
+- **Revenir à une version précédente** : `git checkout v1.0.0-beta.3` (par exemple), puis `docker compose up -d --build`. Les évolutions de la base ne sont pas annulées : préférez restaurer une sauvegarde faite avant la mise à jour.
+- Seul `docker compose down -v` efface les données (le `-v` supprime le volume).
 
 ## Essayer avec des données simulées
 
@@ -63,6 +114,8 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 | Action | Commande |
 | --- | --- |
 | Mettre à jour | `git pull && docker compose up -d --build` |
+| Sauvegarder | `docker compose exec db sh -c 'mariadb-dump -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats' \| gzip > aisseastats.sql.gz` |
+| Restaurer | `gunzip -c aisseastats.sql.gz \| docker compose exec -T db sh -c 'mariadb -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats'` |
 | Journaux | `docker compose logs -f app worker` |
 | État | `docker compose ps` |
 | Mot de passe admin perdu | `docker compose exec app php bin/reset-admin.php` |
@@ -72,5 +125,6 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 ## Bon à savoir
 
 - **Zones nommées** (page admin) : par défaut une route va d'un secteur à un autre (`SO → NE`). Ajoutez une écluse, un port ou une ville pour lire `Port → Écluse nord`.
-- **Photos** : Wikimedia Commons, recherche par numéro IMO. Les bateaux sans IMO (fluvial, plaisance) ont une silhouette. MarineTraffic et VesselFinder sont proposés en liens.
+- **Photos** : dans l'ordre, votre propre photo (admin → Photos de navires, ou lien « Ajouter une photo » sur la fiche quand vous êtes connecté), puis une photo libre de Wikimedia Commons ou Wikidata (par IMO ou MMSI). Beaucoup de bateaux de pêche et de plaisance n'ont aucune photo libre : ajoutez la vôtre. MarineTraffic, VesselFinder et ShipSpotting sont proposés en liens : leurs conditions n'autorisent pas la récupération automatique de leurs photos.
+- **Carte « Access blocked »** ou **graphique vide après changement de période** : corrigés en 1.0.0-beta.4, mettez à jour puis rechargez la page.
 - **Vie privée** : l'historique des passages d'un plaisancier identifiable par MMSI peut être une donnée personnelle. Gardez la page sur le réseau local ; l'admin permet d'effacer un MMSI.

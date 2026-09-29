@@ -81,14 +81,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             . '<h3 class="sub">' . $t('setup.done.token') . '</h3>'
             . '<pre class="cmd">' . Web::e($token) . '</pre>'
             . '<p class="notice">' . $t('setup.done.token_once') . '</p>'
-            . '<h3 class="sub">' . $t('setup.done.cli') . '</h3>'
-            . '<pre class="cmd">' . Web::e(Page::aiscatcherCommand($token)) . '</pre>'
-            . '<h3 class="sub">' . $t('setup.done.managed') . '</h3>'
-            . '<p>' . $t('setup.done.managed_help') . '</p>'
-            . '<pre class="cmd">URL      : ' . Web::e(Page::ingestUrl()) . "\n"
-            . 'userpwd  : aisseastats:' . Web::e($token) . "\n"
-            . "interval : 15\ngzip     : on</pre>"
-            . '<p class="muted small">' . $t('setup.done.meta') . '</p>'
+            . Page::aiscatcherHelp($token)
             . '<p><a class="btn" href="index.php">' . $t('setup.done.go') . '</a> '
             . '<a class="btn secondary" href="admin.php">' . $t('nav.admin') . '</a></p></section>';
         Page::close();
@@ -104,27 +97,44 @@ Page::open(I18n::t('setup.title'));
   <?php foreach ($errors as $err): ?>
     <p class="notice err"><?= Web::e($err) ?></p>
   <?php endforeach; ?>
-  <form method="post" autocomplete="off">
+  <details class="import" id="import">
+    <summary><?= $t('setup.import') ?></summary>
+    <p class="muted small"><?= $t('setup.import_help') ?></p>
+    <pre class="cmd"><?= $t('setup.import_cmd') ?></pre>
+    <div class="field">
+      <label for="import-file"><?= $t('setup.import_file') ?></label>
+      <input id="import-file" type="file" accept=".json,application/json">
+    </div>
+    <div class="field">
+      <label for="import-text"><?= $t('setup.import_paste') ?></label>
+      <textarea id="import-text" rows="5" spellcheck="false" autocomplete="off"></textarea>
+    </div>
+    <p><button class="btn secondary" type="button" id="import-btn"><?= $t('setup.import_btn') ?></button>
+      <span class="muted small" id="import-result" role="status"></span></p>
+  </details>
+  <form method="post" autocomplete="off" id="setup-form">
     <input type="hidden" name="csrf" value="<?= Web::e(Web::csrfToken()) ?>">
+    <?php /* Username field for password managers: without it they take the last text field (longitude) as the user name. */ ?>
+    <input type="text" name="username" value="admin" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
     <div class="field">
       <label for="station_name"><?= $t('setup.station_name') ?></label>
-      <input id="station_name" name="station_name" required maxlength="48" value="<?= Web::e($values['station_name']) ?>" placeholder="<?= $t('setup.ph_name') ?>">
+      <input id="station_name" name="station_name" required maxlength="48" autocomplete="off" value="<?= Web::e($values['station_name']) ?>" placeholder="<?= $t('setup.ph_name') ?>">
     </div>
     <div class="row">
       <div class="field">
         <label for="station_lat"><?= $t('setup.lat') ?></label>
-        <input id="station_lat" name="station_lat" required inputmode="decimal" value="<?= Web::e($values['station_lat']) ?>" placeholder="<?= $t('setup.ph_lat') ?>">
+        <input id="station_lat" name="station_lat" required inputmode="decimal" autocomplete="off" value="<?= Web::e($values['station_lat']) ?>" placeholder="<?= $t('setup.ph_lat') ?>">
       </div>
       <div class="field">
         <label for="station_lon"><?= $t('setup.lon') ?></label>
-        <input id="station_lon" name="station_lon" required inputmode="decimal" value="<?= Web::e($values['station_lon']) ?>" placeholder="<?= $t('setup.ph_lon') ?>">
+        <input id="station_lon" name="station_lon" required inputmode="decimal" autocomplete="off" value="<?= Web::e($values['station_lon']) ?>" placeholder="<?= $t('setup.ph_lon') ?>">
       </div>
     </div>
     <p class="help muted small"><?= $t('setup.position_help') ?></p>
     <div class="row">
       <div class="field">
         <label for="timezone"><?= $t('setup.timezone') ?></label>
-        <select id="timezone" name="timezone">
+        <select id="timezone" name="timezone" data-posted="<?= ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' ? '1' : '0' ?>">
           <?php foreach (Page::timezones() as $tz): ?>
             <option<?= $tz === $values['timezone'] ? ' selected' : '' ?>><?= Web::e($tz) ?></option>
           <?php endforeach; ?>
@@ -153,4 +163,4 @@ Page::open(I18n::t('setup.title'));
   </form>
 </section>
 <?php
-Page::close();
+Page::close(['assets/setup.js']);
