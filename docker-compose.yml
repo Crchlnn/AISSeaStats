@@ -1,0 +1,62 @@
+# AISSeaStats — docker compose up -d --build
+# Settings come from .env (copy .env.example, or let install.sh generate it).
+
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: aisseastats
+      MARIADB_USER: aisseastats
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      TZ: UTC
+    # Small footprint for a Raspberry Pi and fewer SD card writes.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=96M
+      - --innodb-log-file-size=48M
+      - --innodb-flush-log-at-trx-commit=2
+      - --performance-schema=OFF
+      - --skip-name-resolve
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  app:
+    build: .
+    image: aisseastats:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &app-env
+      DB_HOST: db
+      DB_NAME: aisseastats
+      DB_USER: aisseastats
+      DB_PASSWORD: ${DB_PASSWORD}
+      TZ: ${TZ:-Europe/Paris}
+      INGEST_ALLOW: ${INGEST_ALLOW:-}
+    ports:
+      - "${AISSEASTATS_PORT:-8095}:8080"
+
+  worker:
+    build: .
+    image: aisseastats:local
+    restart: unless-stopped
+    command: ["worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app-env
+    healthcheck:
+      disable: true
+
+volumes:
+  db-data:
