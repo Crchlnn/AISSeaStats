@@ -144,6 +144,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.0.0-beta.6 | 2026-09-30 | Alerts when reception stops, and when it comes back: ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) and e-mail, with a test button; optional heartbeat URL to detect a station that is off; clearer database size in the admin |
 | 1.0.0-beta.5 | 2026-09-30 | Destination dictionary in the admin (e.g. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`); meaningless destinations (`0`, `Q`…) shown as *Unknown*; click a bar of the vessel chart to list its vessels; maximum range raised to 1,500 NM by default (tropospheric ducting), with far positions confirmed before they set a record |
 | 1.0.0-beta.4 | 2026-09-30 | One period selector for the whole page, remembered; automatic refresh; click a type, flag, route or destination to list its vessels; readable fleet bars on phones; your own vessel photos, then Wikimedia Commons / Wikidata; setup pre-filled from AIS-catcher's `config.json`; fixes for map tiles "Access blocked" and empty charts |
 | 1.0.0-beta.3 | 2026-09-29 | Flag derived from the MMSI; "rare flag" only once 100 vessels are known; clearer AIS-catcher instructions |
@@ -165,13 +166,24 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 ## Admin page
 
-`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, destination dictionary, vessel photos, token rotation, password, deletion of one vessel's data or of everything.
+`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, destination dictionary, alerts, vessel photos, token rotation, password, deletion of one vessel's data or of everything.
 
 **Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`SW → NE`). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
 
 **Destination dictionary.** Crews type the destination freely: `FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`… Group the spellings of a port under one name (for example `SAINT-MALO, ST-MALO, FR SML` → `FRSML`). The admin lists the destinations received in the last 90 days to help. Meaningless values such as `0` or `Q` are shown as *Unknown*.
 
 **Maximum plausible range** (1,500 NM by default): tropospheric ducting can bring messages from over 1,000 NM. Beyond 50 NM, a position only counts for range records when the same vessel was received shortly before at a consistent position, so a single corrupted message cannot set a record.
+
+## Alerts
+
+AIS-catcher does not tell you when reception stops. AISSeaStats can: in the admin, **Alerts** sends one message when nothing has been received for N minutes (30 by default), and another when reception comes back. Channels, any combination:
+
+- **ntfy**: the ntfy app on your phone, with the public ntfy.sh server or your own. Pick a topic name that is hard to guess.
+- **Telegram**: a bot created with @BotFather, its token and your chat ID.
+- **Webhook**: a JSON POST readable by Discord, Slack, Mattermost, Gotify, Home Assistant or n8n.
+- **E-mail**: through your provider's SMTP server (STARTTLS or SSL/TLS).
+
+“Send a test” checks each channel and shows the error if one fails. These alerts are sent by the Pi itself, so they cannot warn you if the Pi is off or offline: for that, give a **heartbeat** URL (healthchecks.io, Uptime Kuma in Push mode…), called every 5 minutes while reception works.
 
 ## Photos
 
@@ -191,6 +203,7 @@ Free photos are shown with author and licence and cached 30 days. Many fishing b
 | Admin shows "token rejected" | The credentials in AIS-catcher do not match: generate a new token in the admin and paste `aisseastats:<token>` again. |
 | Map tiles show "Access blocked" | Upgrade to 1.0.0-beta.4 or later (the page now sends the Referer that OpenStreetMap requires), or set another tile server in the admin. |
 | A chart stays empty after switching period | Upgrade to 1.0.0-beta.4 or later, then reload the page. |
+| The admin shows a few MB of data but the database folder takes over 100 MB | Normal. The admin shows the statistics themselves; MariaDB's folder also holds fixed-size files, mainly its 96 MB transaction log. Only the data part grows over time. |
 
 ## Security
 

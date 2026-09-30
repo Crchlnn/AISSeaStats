@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/bootstrap.php';
 
+use AISSeaStats\Alert;
 use AISSeaStats\Db;
 use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
@@ -24,6 +25,8 @@ Web::session();
 $t = static fn (string $k, array $v = []): string => Web::e(I18n::t($k, $v));
 $flash = [];
 $newToken = null;
+$alertTest = null;
+$alertDraft = null;
 $action = (string) ($_POST['action'] ?? '');
 
 // ---------- Login / logout ----------
@@ -203,6 +206,26 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $flash[] = ['ok', I18n::t('admin.photo_deleted')];
                 break;
 
+            case 'alerts':
+                try {
+                    $cfg = Alert::fromForm($_POST, Alert::config(), I18n::lang());
+                } catch (InvalidArgumentException $e) {
+                    // Show the form again with what was typed (secrets excepted), not the saved values.
+                    $saved = Alert::config();
+                    $alertDraft = Alert::fromForm($_POST, $saved, I18n::lang(), false);
+                    $alertDraft['ntfy']['token'] = $saved['ntfy']['token'];
+                    $alertDraft['telegram']['token'] = $saved['telegram']['token'];
+                    $alertDraft['email']['pass'] = $saved['email']['pass'];
+                    throw new InvalidArgumentException(I18n::t('admin.alert_invalid', ['f' => I18n::t('admin.alert_f_' . $e->getMessage())]));
+                }
+                Settings::set('alerts', $cfg);
+                if (isset($_POST['test'])) {
+                    $alertTest = Alert::configured($cfg) === [] ? [] : Alert::test();
+                } else {
+                    $flash[] = ['ok', I18n::t('admin.alert_saved')];
+                }
+                break;
+
             case 'reset_data':
                 if (($_POST['confirm'] ?? '') !== 'RESET') {
                     throw new InvalidArgumentException(I18n::t('admin.reset_confirm_needed'));
@@ -244,6 +267,9 @@ $hour = Db::one('SELECT COUNT(*) batches, COALESCE(SUM(msgs), 0) msgs, COALESCE(
 $lastError = Db::one('SELECT ts, error FROM ingest_log WHERE error IS NOT NULL ORDER BY id DESC LIMIT 1');
 $heartbeat = (int) Settings::get('worker_heartbeat');
 $dbSize = (int) Db::value('SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE()');
+// MariaDB's redo log has a fixed size (96 MB by default) and explains most of the Docker volume's size.
+$redoLog = (int) (Db::value('SELECT @@innodb_log_file_size') ?? 0);
+$mb = static fn (int $bytes): string => I18n::t('unit.mb', ['n' => number_format($bytes / 1048576, $bytes < 10485760 ? 1 : 0, ',', "\u{202F}")]);
 $counts = Db::one("SELECT (SELECT COUNT(*) FROM vessel) vessels, (SELECT COUNT(*) FROM position) positions, (SELECT COUNT(*) FROM passage) passages");
 $zones = Db::all('SELECT * FROM zone ORDER BY name');
 $destDict = Destinations::dictionary();
@@ -258,6 +284,7 @@ $photos = Db::all('SELECT p.mmsi, p.credit, p.uploaded_at, p.width, p.height, LE
                    FROM vessel_photo p LEFT JOIN vessel v ON v.mmsi = p.mmsi ORDER BY p.uploaded_at DESC LIMIT 200');
 $photoMmsi = preg_match('/^\d{1,9}$/', (string) ($_GET['photo_mmsi'] ?? '')) ? (string) $_GET['photo_mmsi'] : '';
 $s = Settings::all();
+$ac = $alertDraft ?? Alert::config();
 $r = (array) $s['rules'];
 $ago = static function (?int $ts) use ($now): string {
     if (!$ts) {
@@ -271,7 +298,9 @@ $csrf = Web::e(Web::csrfToken());
 $form = static fn (string $action): string => '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="' . $action . '">';
 
 Page::open(I18n::t('nav.admin'), true);
-foreach ($flash as [$k, $m]) {
+// Messages of the alerts form are shown in its own card (the form returns to #alerts).
+$alertFlash = $action === 'alerts' ? $flash : [];
+foreach ($action === 'alerts' ? [] : $flash as [$k, $m]) {
     echo '<p class="notice ' . $k . '">' . Web::e($m) . '</p>';
 }
 ?>
@@ -286,10 +315,11 @@ foreach ($flash as [$k, $m]) {
     <div><?= $t('admin.msgs_hour') ?><b><?= number_format((int) $hour['msgs'], 0, ',', ' ') ?></b></div>
     <div><?= $t('admin.avg_ms') ?><b><?= (int) $hour['ms'] ?> ms</b></div>
     <div><?= $t('admin.worker') ?><b><?= Web::e($heartbeat ? $ago($heartbeat) : I18n::t('admin.never')) ?></b></div>
-    <div><?= $t('admin.db_size') ?><b><?= number_format($dbSize / 1048576, 1, ',', ' ') ?> Mo</b></div>
+    <div><?= $t('admin.db_size') ?><b><?= Web::e($mb($dbSize)) ?></b></div>
     <div><?= $t('admin.vessels') ?><b><?= number_format((int) $counts['vessels'], 0, ',', ' ') ?></b></div>
     <div><?= $t('admin.positions') ?><b><?= number_format((int) $counts['positions'], 0, ',', ' ') ?></b></div>
   </div>
+  <p class="muted small"><?= $t('admin.db_size_help', ['log' => $mb($redoLog)]) ?></p>
   <?php if ($heartbeat && $now - $heartbeat > 300): ?>
     <p class="notice err"><?= $t('admin.worker_down') ?></p>
   <?php endif; ?>
@@ -353,6 +383,106 @@ foreach ($flash as [$k, $m]) {
   </form>
 </section>
 
+<section class="card" id="alerts">
+  <h2><?= $t('admin.alerts') ?></h2>
+  <p class="muted small"><?= $t('admin.alerts_help') ?></p>
+  <?php foreach ($alertFlash as [$k, $m]): ?><p class="notice <?= $k ?>"><?= Web::e($m) ?></p><?php endforeach; ?>
+  <?php if ($alertTest !== null): ?>
+    <?php if ($alertTest === []): ?><p class="notice err"><?= $t('admin.alert_none') ?></p><?php endif; ?>
+    <?php foreach ($alertTest as $ch => $err): ?>
+      <p class="notice <?= $err === null ? 'ok' : 'err' ?>"><b><?= $t('admin.alert_ch_' . $ch) ?></b> : <?= $err === null ? $t('admin.alert_test_ok') : Web::e($err) ?></p>
+    <?php endforeach; ?>
+  <?php endif; ?>
+  <?php
+    $as = Alert::state();
+    $asLast = Alert::lastMessage();
+  ?>
+  <p class="small">
+    <?php if (!$ac['enabled']): ?><?= $t('admin.alert_state_off') ?>
+    <?php elseif ($as['down']): ?><span class="dot critical"></span><?= $t('admin.alert_state_down', ['a' => $ago((int) $as['alerted'])]) ?>
+    <?php else: ?><span class="dot good"></span><?= $t('admin.alert_state_ok', ['c' => implode(', ', array_map(static fn ($c) => I18n::t('admin.alert_ch_' . $c), Alert::configured($ac))) ?: '–']) ?>
+    <?php endif; ?>
+    <?php if ($as['last_ts']): ?> · <?= $t('admin.alert_last_' . ($as['last_event'] === 'up' ? 'up' : 'down'), ['a' => $ago((int) $as['last_ts'])]) ?>
+      <?php foreach ((array) $as['results'] as $ch => $err): if ($err !== null): ?> · <span class="err-text"><?= $t('admin.alert_ch_' . $ch) ?> : <?= Web::e($err) ?></span><?php endif; endforeach; ?>
+    <?php endif; ?>
+  </p>
+  <form method="post" action="admin.php#alerts" autocomplete="off"><?= $form('alerts') ?>
+    <label class="check"><input type="checkbox" name="alert_enabled"<?= $ac['enabled'] ? ' checked' : '' ?>> <?= $t('admin.alert_enabled') ?></label>
+    <div class="row">
+      <div class="field"><label for="alert_after_min"><?= $t('admin.alert_after') ?></label>
+        <input id="alert_after_min" name="alert_after_min" type="number" min="5" max="1440" value="<?= (int) $ac['after_min'] ?>"></div>
+    </div>
+
+    <fieldset class="alert-ch"><legend>ntfy</legend>
+      <p class="help"><?= $t('admin.alert_ntfy_help') ?></p>
+      <div class="row">
+        <div class="field"><label for="ntfy_url"><?= $t('admin.alert_server') ?></label>
+          <input id="ntfy_url" name="ntfy_url" value="<?= Web::e($ac['ntfy']['url']) ?>" placeholder="https://ntfy.sh"></div>
+        <div class="field"><label for="ntfy_topic"><?= $t('admin.alert_topic') ?></label>
+          <input id="ntfy_topic" name="ntfy_topic" maxlength="64" value="<?= Web::e($ac['ntfy']['topic']) ?>" placeholder="aisseastats-<?= bin2hex(random_bytes(5)) ?>"></div>
+        <div class="field"><label for="ntfy_token"><?= $t('admin.alert_ntfy_token') ?></label>
+          <input id="ntfy_token" name="ntfy_token" type="password" autocomplete="new-password" placeholder="<?= $ac['ntfy']['token'] !== '' ? $t('admin.alert_secret_set') : $t('admin.alert_optional') ?>">
+          <?php if ($ac['ntfy']['token'] !== ''): ?><label class="check small"><input type="checkbox" name="ntfy_token_clear"> <?= $t('admin.alert_clear') ?></label><?php endif; ?></div>
+      </div>
+    </fieldset>
+
+    <fieldset class="alert-ch"><legend>Telegram</legend>
+      <p class="help"><?= $t('admin.alert_telegram_help') ?></p>
+      <div class="row">
+        <div class="field"><label for="telegram_token"><?= $t('admin.alert_bot_token') ?></label>
+          <input id="telegram_token" name="telegram_token" type="password" autocomplete="new-password" placeholder="<?= $ac['telegram']['token'] !== '' ? $t('admin.alert_secret_set') : '123456789:AA…' ?>">
+          <?php if ($ac['telegram']['token'] !== ''): ?><label class="check small"><input type="checkbox" name="telegram_token_clear"> <?= $t('admin.alert_clear') ?></label><?php endif; ?></div>
+        <div class="field"><label for="telegram_chat"><?= $t('admin.alert_chat_id') ?></label>
+          <input id="telegram_chat" name="telegram_chat" maxlength="64" value="<?= Web::e($ac['telegram']['chat']) ?>" placeholder="123456789"></div>
+      </div>
+    </fieldset>
+
+    <fieldset class="alert-ch"><legend><?= $t('admin.alert_ch_webhook') ?></legend>
+      <p class="help"><?= $t('admin.alert_webhook_help') ?></p>
+      <div class="field"><label for="webhook_url"><?= $t('admin.alert_url') ?></label>
+        <input id="webhook_url" name="webhook_url" maxlength="500" value="<?= Web::e($ac['webhook']['url']) ?>" placeholder="https://…"></div>
+    </fieldset>
+
+    <fieldset class="alert-ch"><legend><?= $t('admin.alert_ch_email') ?></legend>
+      <p class="help"><?= $t('admin.alert_email_help') ?></p>
+      <div class="row">
+        <div class="field"><label for="smtp_host"><?= $t('admin.alert_smtp_host') ?></label>
+          <input id="smtp_host" name="smtp_host" maxlength="120" value="<?= Web::e($ac['email']['host']) ?>" placeholder="smtp.example.com"></div>
+        <div class="field"><label for="smtp_port"><?= $t('admin.alert_smtp_port') ?></label>
+          <input id="smtp_port" name="smtp_port" type="number" min="1" max="65535" value="<?= (int) $ac['email']['port'] ?>"></div>
+        <div class="field"><label for="smtp_security"><?= $t('admin.alert_smtp_security') ?></label>
+          <select id="smtp_security" name="smtp_security">
+            <?php foreach (['starttls' => 'STARTTLS (587)', 'ssl' => 'SSL/TLS (465)', 'none' => I18n::t('admin.alert_smtp_none')] as $k => $lbl): ?>
+              <option value="<?= $k ?>"<?= $ac['email']['security'] === $k ? ' selected' : '' ?>><?= Web::e($lbl) ?></option>
+            <?php endforeach; ?>
+          </select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="smtp_user"><?= $t('admin.alert_smtp_user') ?></label>
+          <input id="smtp_user" name="smtp_user" maxlength="120" autocomplete="off" value="<?= Web::e($ac['email']['user']) ?>" placeholder="<?= $t('admin.alert_optional') ?>"></div>
+        <div class="field"><label for="smtp_pass"><?= $t('admin.alert_smtp_pass') ?></label>
+          <input id="smtp_pass" name="smtp_pass" type="password" autocomplete="new-password" placeholder="<?= $ac['email']['pass'] !== '' ? $t('admin.alert_secret_set') : $t('admin.alert_optional') ?>">
+          <?php if ($ac['email']['pass'] !== ''): ?><label class="check small"><input type="checkbox" name="smtp_pass_clear"> <?= $t('admin.alert_clear') ?></label><?php endif; ?></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="smtp_from"><?= $t('admin.alert_smtp_from') ?></label>
+          <input id="smtp_from" name="smtp_from" type="email" maxlength="120" value="<?= Web::e($ac['email']['from']) ?>" placeholder="station@example.com"></div>
+        <div class="field"><label for="smtp_to"><?= $t('admin.alert_smtp_to') ?></label>
+          <input id="smtp_to" name="smtp_to" maxlength="500" value="<?= Web::e($ac['email']['to']) ?>" placeholder="me@example.com, other@example.com"></div>
+      </div>
+    </fieldset>
+
+    <fieldset class="alert-ch"><legend><?= $t('admin.alert_heartbeat') ?></legend>
+      <p class="help"><?= $t('admin.alert_heartbeat_help') ?></p>
+      <div class="field"><label for="heartbeat_url"><?= $t('admin.alert_url') ?></label>
+        <input id="heartbeat_url" name="heartbeat_url" maxlength="500" value="<?= Web::e($ac['heartbeat_url']) ?>" placeholder="https://hc-ping.com/…"></div>
+    </fieldset>
+
+    <p><button class="btn" type="submit"><?= $t('admin.save') ?></button>
+      <button class="btn secondary" type="submit" name="test" value="1"><?= $t('admin.alert_test') ?></button></p>
+  </form>
+</section>
+
 <section class="card">
   <h2><?= $t('admin.rules') ?></h2>
   <p class="muted small"><?= $t('admin.rules_help') ?></p>
@@ -395,8 +525,7 @@ foreach ($flash as [$k, $m]) {
     <table class="table"><tbody>
       <?php foreach ($zones as $z): ?>
         <tr><td><b><?= Web::e($z['name']) ?></b></td>
-          <td class="r"><?= Web::e($z['lat']) ?>, <?= Web::e($z['lon']) ?></td>
-          <td class="r"><?= Web::e($z['radius_nm']) ?> NM</td>
+          <td class="r coords"><?= Web::e($z['lat']) ?>, <?= Web::e($z['lon']) ?> <span class="muted">· <?= Web::e($z['radius_nm']) ?>&nbsp;NM</span></td>
           <td class="r"><form method="post"><?= $form('zone_del') ?><input type="hidden" name="zone_id" value="<?= (int) $z['id'] ?>">
             <button class="btn danger" type="submit"><?= $t('admin.delete') ?></button></form></td></tr>
       <?php endforeach; ?>

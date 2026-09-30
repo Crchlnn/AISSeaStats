@@ -36,6 +36,15 @@ final class I18n
         return $pref;
     }
 
+    /** Force a language (background jobs have no browser to ask). */
+    public static function setLang(string $lang): void
+    {
+        if (in_array($lang, self::LANGS, true) && $lang !== self::$lang) {
+            self::$lang = $lang;
+            self::$dict = [];
+        }
+    }
+
     /** @return array<string, string> */
     public static function dict(): array
     {

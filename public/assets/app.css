@@ -342,3 +342,13 @@ pre.cmd {
 .dest-row, .dest-head { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
 .dest-row input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); width: 100%; }
 .dest-seen .btn { padding: 4px 10px; font-size: 13px; }
+
+/* Admin: alert channels */
+.alert-ch { border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px 10px; margin: 14px 0; }
+.alert-ch legend { font-weight: 600; padding: 0 6px; }
+.alert-ch .help { margin: 0 0 8px; font-size: 12px; color: var(--text-3); }
+.err-text { color: var(--critical); }
+.table td.coords { white-space: normal; }
+.alert-ch .field { align-content: start; }
+.field .check { margin: 2px 0 0; font-size: 13px; font-weight: 400; }
+.field .check input { width: auto; margin: 0; }

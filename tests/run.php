@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/bootstrap.php';
 
+use AISSeaStats\Alert;
 use AISSeaStats\Db;
 use AISSeaStats\Geo;
 use AISSeaStats\Ingest;
@@ -109,6 +110,12 @@ check('dest canonical untouched', Destinations::canonical('FRCER', $map) === 'FR
 check('dest sql parameters', substr_count($dsql, '?') - 1 === count($dparams) && end($dparams) === 'FRSML');
 check('dest label locode', Destinations::label('FRSML', 'fr sml', $map) === 'FRSML' && Destinations::label('BREHAT', 'Bréhat', []) === 'Bréhat');
 
+// SMTP helpers
+check('smtp addresses', AISSeaStats\Smtp::addresses("a@x.fr; b@y.com\nnope, a@x.fr") === ['a@x.fr', 'b@y.com']);
+check('smtp header injection refused', !AISSeaStats\Smtp::validAddress("a@x.fr\r\nBcc: z@z.z"));
+$msg = AISSeaStats\Smtp::message('a@x.fr', ['b@y.com'], 'Été', 'Réception');
+check('smtp message utf-8', str_contains($msg, 'Subject: =?UTF-8?B?' . base64_encode('Été') . '?=') && str_contains($msg, base64_encode('Réception')));
+
 // Integration (database)
 if (getenv('DB_HOST')) {
     Db::waitReady(60);
@@ -189,6 +196,53 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     $ph = AISSeaStats\Enrich::photo(244030470, 9074729);
     check('local photo has priority', $ph !== null && $ph['source'] === 'local' && $ph['author'] === 'Me');
     AISSeaStats\Enrich::$http = null;
+
+    // Alerts: one alert after the silence threshold, none repeated, one recovery message.
+    $sent = [];
+    Alert::$http = static function (string $url, string $body, array $headers, string $method) use (&$sent): array {
+        $sent[] = [$url, json_decode($body, true), $method];
+        return str_contains($url, 'api.telegram.org') ? [200, '{"ok":true}'] : [200, 'ok'];
+    };
+    $mails = [];
+    Alert::$mailer = static function (array $cfg, string $subject, string $body) use (&$mails): void { $mails[] = [$cfg['to'], $subject]; };
+    $cfg = Alert::fromForm(['alert_enabled' => '1', 'alert_after_min' => '30', 'ntfy_url' => 'https://ntfy.sh/', 'ntfy_topic' => 'ais-test_1',
+        'telegram_token' => '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'telegram_chat' => '-100123', 'webhook_url' => 'https://hooks.example/x?token=1',
+        'smtp_host' => 'smtp.example.com', 'smtp_port' => '587', 'smtp_security' => 'starttls', 'smtp_from' => 'st@example.com',
+        'smtp_to' => 'a@example.com, bad, b@example.com', 'heartbeat_url' => 'https://hc.example/ping'], Alert::defaults(), 'fr');
+    check('alert form parsed', $cfg['email']['to'] === 'a@example.com, b@example.com' && $cfg['ntfy']['url'] === 'https://ntfy.sh'
+        && Alert::configured($cfg) === ['ntfy', 'telegram', 'webhook', 'email']);
+    $kept = Alert::fromForm(['telegram_chat' => '42'], $cfg, 'fr');
+    check('alert secrets kept when left empty', $kept['telegram']['token'] === $cfg['telegram']['token'] && !$kept['enabled']);
+    check('alert secret cleared', Alert::fromForm(['telegram_token_clear' => '1'], $cfg, 'fr')['telegram']['token'] === '');
+    $bad = false;
+    try { Alert::fromForm(['webhook_url' => 'javascript:alert(1)'], $cfg, 'fr'); } catch (InvalidArgumentException $e) { $bad = $e->getMessage() === 'webhook_url'; }
+    check('alert bad url rejected', $bad);
+    Settings::set('alerts', $cfg);
+    Settings::set('alert_state', null);
+    $last = Alert::lastMessage();
+    check('alert: nothing while fresh', Alert::check($last + 600) === null && count($sent) === 1 && $sent[0][2] === 'GET'); // heartbeat only
+    $sent = [];
+    check('alert: down after threshold', Alert::check($last + 31 * 60) === 'down' && count($sent) === 3 && count($mails) === 1);
+    check('alert: ntfy json', $sent[0][0] === 'https://ntfy.sh/' && $sent[0][1]['topic'] === 'ais-test_1' && preg_match('/31\s?min/u', $sent[0][1]['message']) === 1);
+    check('alert: french text', str_contains($mails[0][1], 'plus de données AIS'));
+    check('alert: not repeated', Alert::check($last + 45 * 60) === null && count($sent) === 3);
+    Db::run('UPDATE vessel SET last_seen = ? WHERE mmsi = 244030470', [$last + 50 * 60]);
+    $ev = Alert::check($last + 51 * 60);
+    $hook = array_values(array_filter($sent, static fn ($x) => str_starts_with($x[0], 'https://hooks.example/')));
+    check('alert: recovery', $ev === 'up' && count($mails) === 2 && count($hook) === 2 && $hook[1][1]['event'] === 'up'
+        && preg_match('/50\s?min/u', $hook[1][1]['text']) === 1);
+    Settings::set('alert_state', null);
+    $prevLog = ini_set('error_log', '/dev/null');
+    Alert::$http = static fn (): array => [500, 'boom'];
+    Alert::$mailer = static function (): void { throw new RuntimeException('smtp down'); };
+    Db::run('UPDATE vessel SET last_seen = ? WHERE mmsi = 244030470', [$last]);
+    Alert::check($last + 40 * 60);
+    $st = Alert::state();
+    check('alert: all channels failed, retried later', !$st['down'] && $st['retry'] > 0 && $st['results']['email'] === 'smtp down' && str_starts_with((string) $st['results']['ntfy'], 'HTTP 500'));
+    ini_set('error_log', (string) $prevLog);
+    Settings::set('alerts', null);
+    Alert::$http = null;
+    Alert::$mailer = null;
 }
 
 echo "{$pass} passed, {$fail} failed\n";

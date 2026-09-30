@@ -2,6 +2,19 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.0.0-beta.6 — 30/09/2026
+
+Nouveautés
+- Alertes (admin) : un message quand aucun message AIS n'a été reçu depuis N minutes (30 par défaut), un autre quand la réception revient. Canaux : ntfy, Telegram, webhook (contenu lisible par Discord, Slack, Mattermost, Gotify, Home Assistant) et e-mail par SMTP (STARTTLS ou SSL/TLS). « Envoyer un test » donne le résultat de chaque canal
+- URL heartbeat facultative (healthchecks.io, Uptime Kuma…), appelée toutes les 5 minutes tant que la réception fonctionne, pour être prévenu quand la station elle-même est éteinte
+
+Changements
+- Admin : la tuile « Base de données » devient « Données (tables) », avec l'explication de la taille plus grande du volume Docker de MariaDB (journal de transactions de taille fixe)
+- Admin : la liste des zones tient sur un téléphone
+- CI : actions/checkout v5 et machines Ubuntu 24.04 ; le test de fumée part d'une base vide
+
+Pas de migration de base de données.
+
 ## 1.0.0-beta.5 — 30/09/2026
 
 Retours du deuxième jour de tests.

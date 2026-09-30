@@ -32,6 +32,12 @@ final class Worker
             $this->lastFull = $now;
         }
         Settings::set('worker_heartbeat', $now);
+        // Alerts last, and isolated: a failing notification channel never stops the statistics.
+        try {
+            Alert::check($now);
+        } catch (\Throwable $e) {
+            error_log('[aisseastats] alerts: ' . $e->getMessage());
+        }
     }
 
     public function closePassages(int $now): int

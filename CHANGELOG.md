@@ -2,6 +2,19 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.0.0-beta.6 — 2026-09-30
+
+New
+- Alerts (admin): one message when no AIS message has been received for N minutes (30 by default), one when reception comes back. Channels: ntfy, Telegram, webhook (payload readable by Discord, Slack, Mattermost, Gotify, Home Assistant) and e-mail over SMTP (STARTTLS or SSL/TLS). "Send a test" reports the result of each channel
+- Optional heartbeat URL (healthchecks.io, Uptime Kuma…), called every 5 minutes while reception works, to be warned when the station itself is off
+
+Changes
+- Admin: the database tile is now "Data (tables)", with an explanation of why MariaDB's Docker volume is bigger (fixed-size transaction log)
+- Admin: zone list fits on a phone
+- CI: actions/checkout v5 and Ubuntu 24.04 runners; the smoke test starts from an empty database
+
+No database migration.
+
 ## 1.0.0-beta.5 — 2026-09-30
 
 Feedback from the second day of tests.

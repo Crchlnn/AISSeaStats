@@ -10,12 +10,18 @@ BASE="http://127.0.0.1:${PORT}"
 JAR=$(mktemp)
 trap 'kill "$SERVER" 2>/dev/null || true; rm -f "$JAR"' EXIT
 
-php -d output_buffering=0 -S "127.0.0.1:${PORT}" -t public > /dev/null 2>&1 &
+# Several workers: the alert test below makes the server call itself.
+PHP_CLI_SERVER_WORKERS=4 php -d output_buffering=0 -S "127.0.0.1:${PORT}" -t public > /dev/null 2>&1 &
 SERVER=$!
 sleep 1
 
+# Start from an empty station: CI runs this after tests/run.php on the same database.
+# shellcheck disable=SC2016 # PHP code, $t must not be expanded by the shell
 php -r 'require "src/bootstrap.php"; AISSeaStats\Db::waitReady(30); AISSeaStats\Migrator::run();
-  AISSeaStats\Db::pdo()->exec("DELETE FROM setting");'
+  foreach (["setting", "vessel", "stats_hourly", "stats_daily", "vessel_hourly", "vessel_daily", "msgtype_daily",
+    "position", "passage", "range_polar", "ingest_log", "zone", "vessel_photo", "photo_lookup"] as $t) {
+      AISSeaStats\Db::pdo()->exec("DELETE FROM $t");
+  }'
 
 csrf() { grep -o 'name="csrf" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"$//'; }
 fail() { echo "FAIL  $*"; exit 1; }
@@ -84,5 +90,14 @@ rm -f "$PNG"
 ctype=$(curl -s -o /dev/null -w '%{content_type}' "$BASE/photo.php?mmsi=227000101")
 [ "$ctype" = "image/png" ] || fail "uploaded photo not served ($ctype)"
 curl -s "$BASE/api.php?q=photo&mmsi=227000101" | grep -q '"source":"local"' || fail "local photo not used"
+
+# Alerts: saved from the admin, "Send a test" through a webhook (this server's health page).
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+out=$(curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=alerts -d alert_enabled=1 -d alert_after_min=30 \
+  --data-urlencode "webhook_url=$BASE/health.php" -d test=1 "$BASE/admin.php")
+echo "$out" | grep -q "test message sent" || fail "alert test through webhook failed"
+out=$(curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=alerts --data-urlencode "webhook_url=javascript:x" "$BASE/admin.php")
+echo "$out" | grep -q "Invalid alert setting" || fail "invalid webhook URL accepted"
+curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | grep -q 'Data (tables)' || fail "database size tile missing"
 
 echo "smoke test passed"
