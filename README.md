@@ -9,11 +9,19 @@ AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it
 - **Top vessels** by passages, days seen, length, speed and distance
 - **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
 - **Fleet** by type and flag, and **range by direction**
-- A **vessel card** on click: photo (Wikimedia Commons), identity, size, first and last seen, recent passages, track, links to MarineTraffic and VesselFinder
+- A **vessel card** on click: photo (your own, or Wikimedia Commons), identity, size, first and last seen, recent passages, track, links to MarineTraffic, VesselFinder and ShipSpotting
+- **Alerts** when your station stops receiving: ntfy, Telegram, webhook or e-mail
 
 French and English, light and dark themes, works on a phone. Runs next to AIS-catcher on a Raspberry Pi.
 
 > Français : voir [docs/README.fr.md](docs/README.fr.md).
+
+![Statistics page: key figures, vessels seen per hour, top routes and declared destinations](docs/screenshots/overview.png)
+
+<p>
+  <img src="docs/screenshots/vessel-card.png" alt="Vessel card with identity, track on the map and recent passages" width="49%">
+  <img src="docs/screenshots/fleet-range.png" alt="Top vessels, fleet by type and flag, range by direction" width="49%">
+</p>
 
 ## How it works
 
@@ -144,7 +152,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
-| 1.0.0-beta.6 | 2026-09-30 | Alerts when reception stops, and when it comes back: ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) and e-mail, with a test button; optional heartbeat URL to detect a station that is off; clearer database size in the admin |
+| 1.0.0-beta.6 | 2026-09-30 | Alerts when reception stops, and when it comes back: ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) and e-mail, with a test button; optional heartbeat URL to detect a station that is off; type of inland vessels from Inland AIS data; clearer database size in the admin |
 | 1.0.0-beta.5 | 2026-09-30 | Destination dictionary in the admin (e.g. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`); meaningless destinations (`0`, `Q`…) shown as *Unknown*; click a bar of the vessel chart to list its vessels; maximum range raised to 1,500 NM by default (tropospheric ducting), with far positions confirmed before they set a record |
 | 1.0.0-beta.4 | 2026-09-30 | One period selector for the whole page, remembered; automatic refresh; click a type, flag, route or destination to list its vessels; readable fleet bars on phones; your own vessel photos, then Wikimedia Commons / Wikidata; setup pre-filled from AIS-catcher's `config.json`; fixes for map tiles "Access blocked" and empty charts |
 | 1.0.0-beta.3 | 2026-09-29 | Flag derived from the MMSI; "rare flag" only once 100 vessels are known; clearer AIS-catcher instructions |
@@ -172,6 +180,8 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 **Destination dictionary.** Crews type the destination freely: `FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`… Group the spellings of a port under one name (for example `SAINT-MALO, ST-MALO, FR SML` → `FRSML`). The admin lists the destinations received in the last 90 days to help. Meaningless values such as `0` or `Q` are shown as *Unknown*.
 
+<img src="docs/screenshots/admin-destinations.png" alt="Destination dictionary in the admin page" width="70%">
+
 **Maximum plausible range** (1,500 NM by default): tropospheric ducting can bring messages from over 1,000 NM. Beyond 50 NM, a position only counts for range records when the same vessel was received shortly before at a consistent position, so a single corrupted message cannot set a record.
 
 ## Alerts
@@ -184,6 +194,8 @@ AIS-catcher does not tell you when reception stops. AISSeaStats can: in the admi
 - **E-mail**: through your provider's SMTP server (STARTTLS or SSL/TLS).
 
 “Send a test” checks each channel and shows the error if one fails. These alerts are sent by the Pi itself, so they cannot warn you if the Pi is off or offline: for that, give a **heartbeat** URL (healthchecks.io, Uptime Kuma in Push mode…), called every 5 minutes while reception works.
+
+<img src="docs/screenshots/admin-alerts.png" alt="Alert settings in the admin page" width="70%">
 
 ## Photos
 

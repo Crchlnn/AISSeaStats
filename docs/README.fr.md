@@ -2,6 +2,13 @@
 
 Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic.
 
+![Page de statistiques : chiffres clés, navires vus par heure, top routes et destinations déclarées](screenshots/overview.png)
+
+<p>
+  <img src="screenshots/vessel-card.png" alt="Fiche navire : identité, trace sur la carte, passages récents" width="49%">
+  <img src="screenshots/fleet-range.png" alt="Top navires, flotte par type et pavillon, portée par direction" width="49%">
+</p>
+
 ## Prérequis
 
 | | Minimum | Recommandé |
@@ -108,7 +115,7 @@ La plus récente en premier. Détail, corrections et évolutions de la base pour
 
 | Version | Date | Nouveautés |
 |---|---|---|
-| 1.0.0-beta.6 | 30/09/2026 | Alertes quand la réception s'arrête puis revient : ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) et e-mail, avec bouton de test ; URL heartbeat facultative pour détecter une station éteinte ; taille de la base plus claire dans l'admin |
+| 1.0.0-beta.6 | 30/09/2026 | Alertes quand la réception s'arrête puis revient : ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) et e-mail, avec bouton de test ; URL heartbeat facultative pour détecter une station éteinte ; type des péniches tiré des données AIS Inland ; taille de la base plus claire dans l'admin |
 | 1.0.0-beta.5 | 30/09/2026 | Dictionnaire des destinations dans l'admin (ex. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`) ; destinations sans signification (`0`, `Q`…) affichées « Inconnue » ; clic sur une barre du graphique des navires pour en voir la liste ; portée maximale portée à 1 500 NM par défaut (propagation troposphérique), les positions lointaines devant être confirmées pour établir un record |
 | 1.0.0-beta.4 | 30/09/2026 | Un seul sélecteur de période pour toute la page, mémorisé ; actualisation automatique ; clic sur un type, un pavillon, une route ou une destination pour lister ses navires ; barres de flotte lisibles sur téléphone ; vos propres photos de navires, puis Wikimedia Commons / Wikidata ; installation pré-remplie depuis le `config.json` d'AIS-catcher ; corrections de la carte « Access blocked » et des graphiques vides |
 | 1.0.0-beta.3 | 29/09/2026 | Pavillon déduit du MMSI ; « pavillon rare » seulement à partir de 100 navires connus ; instructions AIS-catcher plus claires |

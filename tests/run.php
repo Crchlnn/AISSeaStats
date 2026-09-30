@@ -110,6 +110,10 @@ check('dest canonical untouched', Destinations::canonical('FRCER', $map) === 'FR
 check('dest sql parameters', substr_count($dsql, '?') - 1 === count($dparams) && end($dparams) === 'FRSML');
 check('dest label locode', Destinations::label('FRSML', 'fr sml', $map) === 'FRSML' && Destinations::label('BREHAT', 'Bréhat', []) === 'Bréhat');
 
+// Inland ERI ship types
+check('eri motor freighter is cargo', Ingest::eriToAis(8010) === 79 && Ingest::eriToAis(8250) === 79);
+check('eri tanker, passenger, unknown', Ingest::eriToAis(8021) === 89 && Ingest::eriToAis(8443) === 69 && Ingest::eriToAis(8000) === null);
+
 // SMTP helpers
 check('smtp addresses', AISSeaStats\Smtp::addresses("a@x.fr; b@y.com\nnope, a@x.fr") === ['a@x.fr', 'b@y.com']);
 check('smtp header injection refused', !AISSeaStats\Smtp::validAddress("a@x.fr\r\nBcc: z@z.z"));
@@ -155,6 +159,14 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     // A new message after the gap starts a second passage.
     (new Ingest($now + 4 * 3600))->process([['mmsi' => 244030470, 'type' => 1, 'rxuxtime' => $now + 4 * 3600, 'lat' => 51.87, 'lon' => 4.50]]);
     check('second passage after gap', (int) Db::value('SELECT passages FROM vessel WHERE mmsi = 244030470') === 2);
+    // Inland vessel heard through DAC 200 FID 10 only: ENI, length and type from the ERI code; type 5 wins later.
+    (new Ingest($now))->process([['mmsi' => 226007350, 'type' => 8, 'dac' => 200, 'fid' => 10, 'rxuxtime' => $now,
+        'vin' => '01823383', 'length' => 73.5, 'beam' => 8.2, 'shiptype' => 8010]]);
+    $iv = Db::one('SELECT name, eni, shiptype, length_m FROM vessel WHERE mmsi = 226007350');
+    check('inland static without type 5', $iv['name'] === null && $iv['eni'] === '01823383' && (int) $iv['shiptype'] === 79 && (int) $iv['length_m'] === 74);
+    (new Ingest($now + 60))->process([['mmsi' => 226007350, 'type' => 5, 'rxuxtime' => $now + 60, 'shipname' => 'LU MA', 'shiptype' => 70]]);
+    $iv = Db::one('SELECT name, shiptype FROM vessel WHERE mmsi = 226007350');
+    check('type 5 completes inland vessel', $iv['name'] === 'LU MA' && (int) $iv['shiptype'] === 70);
     // Long range: a lone far position is kept for the track but not for range records;
     // a second one shortly after, at a consistent place, counts (tropospheric ducting).
     $far = static fn (int $t, float $lat): array => ['mmsi' => 227000001, 'type' => 1, 'rxuxtime' => $t, 'lat' => $lat, 'lon' => 4.4792, 'speed' => 12];

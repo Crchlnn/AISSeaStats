@@ -470,10 +470,36 @@ final class Ingest
             if ($v['beam_m'] === null && isset($m['beam']) && is_numeric($m['beam']) && (float) $m['beam'] > 0) {
                 $set('beam_m', (int) round((float) $m['beam']));
             }
+            // Many inland vessels are heard through this message before (or without) their type 5:
+            // take the type from the ERI code until the AIS type arrives.
+            if (empty($v['shiptype']) && isset($m['shiptype']) && is_numeric($m['shiptype'])) {
+                $set('shiptype', self::eriToAis((int) $m['shiptype']));
+            }
         }
         if ($changed) {
             $v['static_updated'] = $ts;
         }
+    }
+
+    /**
+     * ERI inland ship type (CCNR / UNECE, 4 digits) to the closest AIS ship type, grouped as AIS-catcher does.
+     */
+    public static function eriToAis(int $eri): ?int
+    {
+        return match (true) {
+            in_array($eri, [8010, 8030, 8050, 8070, 8090, 8110, 8130, 8140, 8150, 8170, 1500, 1510, 1520], true),
+            $eri >= 8210 && $eri <= 8390 => 79,   // motor freighters, push-tows, cargo barges
+            in_array($eri, [8020, 8021, 8022, 8023, 8040, 8060, 8080, 8100, 8120, 8160, 8161, 8162, 8163, 8180,
+                8490, 8500, 1530, 1540], true) => 89, // tankers, tank barges, bunker ships
+            $eri >= 8440 && $eri <= 8448 => 69,  // ferries, passenger and cabin ships
+            in_array($eri, [8400, 8410, 8420, 8430], true) => 52, // tugs and push boats
+            $eri >= 8450 && $eri <= 8454 => 53,  // service vessels
+            $eri === 8460 => 33,                 // work and maintenance craft
+            $eri === 8480 => 30,                 // fishing
+            $eri === 1850 => 37,                 // pleasure craft
+            in_array($eri, [1900, 1910, 1920], true) => 49, // high-speed craft
+            default => null,
+        };
     }
 
     private function startPassage(int $mmsi, int $ts): int

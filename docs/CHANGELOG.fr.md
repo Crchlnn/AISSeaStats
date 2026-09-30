@@ -7,10 +7,12 @@ Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 Nouveautés
 - Alertes (admin) : un message quand aucun message AIS n'a été reçu depuis N minutes (30 par défaut), un autre quand la réception revient. Canaux : ntfy, Telegram, webhook (contenu lisible par Discord, Slack, Mattermost, Gotify, Home Assistant) et e-mail par SMTP (STARTTLS ou SSL/TLS). « Envoyer un test » donne le résultat de chaque canal
 - URL heartbeat facultative (healthchecks.io, Uptime Kuma…), appelée toutes les 5 minutes tant que la réception fonctionne, pour être prévenu quand la station elle-même est éteinte
+- Navigation intérieure : le type de navire est tiré des données AIS Inland (code ERI) en attendant le message statique du navire ; les péniches n'apparaissent plus en « Type non déclaré »
 
 Changements
 - Admin : la tuile « Base de données » devient « Données (tables) », avec l'explication de la taille plus grande du volume Docker de MariaDB (journal de transactions de taille fixe)
 - Admin : la liste des zones tient sur un téléphone
+- README : captures d'écran
 - CI : actions/checkout v5 et machines Ubuntu 24.04 ; le test de fumée part d'une base vide
 
 Pas de migration de base de données.
