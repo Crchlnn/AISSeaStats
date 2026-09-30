@@ -1,5 +1,23 @@
 # Changelog
 
+French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
+
+## 1.0.0-beta.5 — 2026-09-30
+
+Feedback from the second day of tests.
+
+New
+- Destination dictionary (admin): group the spellings of a port under one name, e.g. "SAINT-MALO, ST-MALO, FR SML" → FRSML. The admin lists the destinations received in the last 90 days with a "Group…" shortcut
+- Meaningless destinations ("0", "Q", "NONE"…) are shown as "Unknown"
+- Click a bar of the vessel chart to list the vessels of that hour, day or month
+
+Changes
+- Maximum plausible range raised from 200 to 1,500 NM by default (up to 3,000): tropospheric ducting brings messages from over 1,000 NM. Beyond 50 NM a position only counts for range records when the same vessel was received shortly before at a consistent position
+- Privacy note about MMSI removed from the documentation (an MMSI identifies a vessel, not a person)
+- Version history in the README (English and French) and a French changelog
+
+Database: migration 003 (range 200 → 1,500 NM if the old default was still set), applied automatically.
+
 ## 1.0.0-beta.4 — 2026-09-30
 
 Feedback from the first two stations.

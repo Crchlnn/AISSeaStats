@@ -6,6 +6,7 @@ declare(strict_types=1);
 require __DIR__ . '/../src/bootstrap.php';
 
 use AISSeaStats\Db;
+use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
 use AISSeaStats\Page;
 use AISSeaStats\Rules;
@@ -85,7 +86,7 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 Settings::set('station_lon', round((float) $lon, 6));
                 Settings::set('timezone', $tz);
                 Settings::set('lang', in_array($_POST['lang'] ?? '', ['fr', 'en'], true) ? $_POST['lang'] : 'auto');
-                Settings::set('max_range_nm', max(5, min(1000, (int) ($_POST['max_range_nm'] ?? 200))));
+                Settings::set('max_range_nm', max(5, min(3000, (int) ($_POST['max_range_nm'] ?? 1500))));
                 Settings::set('passage_gap_min', max(15, min(1440, (int) ($_POST['passage_gap_min'] ?? 120))));
                 Settings::set('position_retention_days', max(1, min(365, (int) ($_POST['position_retention_days'] ?? 30))));
                 Settings::set('enrich_enabled', isset($_POST['enrich_enabled']));
@@ -166,6 +167,12 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $flash[] = ['ok', I18n::t('admin.mmsi_deleted', ['m' => $mmsi])];
                 break;
 
+            case 'dest_aliases':
+                $rows = Destinations::parseForm((array) ($_POST['dest_from'] ?? []), (array) ($_POST['dest_to'] ?? []));
+                Settings::set('dest_aliases', $rows);
+                $flash[] = ['ok', I18n::t('admin.dest_saved', ['n' => count($rows)])];
+                break;
+
             case 'photo_upload':
                 $mmsi = (int) ($_POST['photo_mmsi'] ?? 0);
                 if ($mmsi < 1 || $mmsi > 999999999) {
@@ -239,6 +246,14 @@ $heartbeat = (int) Settings::get('worker_heartbeat');
 $dbSize = (int) Db::value('SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE()');
 $counts = Db::one("SELECT (SELECT COUNT(*) FROM vessel) vessels, (SELECT COUNT(*) FROM position) positions, (SELECT COUNT(*) FROM passage) passages");
 $zones = Db::all('SELECT * FROM zone ORDER BY name');
+$destDict = Destinations::dictionary();
+$destMap = Destinations::map($destDict);
+[$dkeySql, $dkeyParams] = Destinations::sql($destMap);
+$destSeen = Db::all("SELECT " . Destinations::RAW_KEY . " AS rk, {$dkeySql} AS ck,
+        SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT UPPER(TRIM(destination)) ORDER BY UPPER(TRIM(destination)) SEPARATOR '|'), '|', 6) AS variants,
+        COUNT(*) AS vessels
+    FROM vessel WHERE last_seen >= ? AND destination IS NOT NULL AND destination <> ''
+    GROUP BY rk, ck ORDER BY vessels DESC LIMIT 40", array_merge($dkeyParams, [$now - 90 * 86400]));
 $photos = Db::all('SELECT p.mmsi, p.credit, p.uploaded_at, p.width, p.height, LENGTH(p.data) AS bytes, v.name
                    FROM vessel_photo p LEFT JOIN vessel v ON v.mmsi = p.mmsi ORDER BY p.uploaded_at DESC LIMIT 200');
 $photoMmsi = preg_match('/^\d{1,9}$/', (string) ($_GET['photo_mmsi'] ?? '')) ? (string) $_GET['photo_mmsi'] : '';
@@ -320,7 +335,7 @@ foreach ($flash as [$k, $m]) {
     </div>
     <div class="row">
       <div class="field"><label for="max_range_nm"><?= $t('admin.max_range') ?></label>
-        <input id="max_range_nm" name="max_range_nm" type="number" min="5" max="1000" value="<?= (int) $s['max_range_nm'] ?>">
+        <input id="max_range_nm" name="max_range_nm" type="number" min="5" max="3000" value="<?= (int) $s['max_range_nm'] ?>">
         <span class="help"><?= $t('admin.max_range_help') ?></span></div>
       <div class="field"><label for="passage_gap_min"><?= $t('admin.gap') ?></label>
         <input id="passage_gap_min" name="passage_gap_min" type="number" min="15" max="1440" value="<?= (int) $s['passage_gap_min'] ?>">
@@ -396,6 +411,38 @@ foreach ($flash as [$k, $m]) {
     </div>
     <p><button class="btn" type="submit"><?= $t('admin.zone_add') ?></button></p>
   </form>
+</section>
+
+<section class="card" id="destinations">
+  <h2><?= $t('admin.dest') ?></h2>
+  <p class="muted small"><?= $t('admin.dest_help') ?></p>
+  <form method="post" id="dest-form"><?= $form('dest_aliases') ?>
+    <div class="dest-rows" id="dest-rows">
+      <div class="dest-head row"><span class="help"><?= $t('admin.dest_from') ?></span><span class="help"><?= $t('admin.dest_to') ?></span></div>
+      <?php foreach (array_merge($destDict, [['to' => '', 'from' => []]]) as $d): ?>
+        <div class="dest-row">
+          <input name="dest_from[]" value="<?= Web::e(implode(', ', (array) $d['from'])) ?>" placeholder="<?= $t('admin.dest_from_ph') ?>" aria-label="<?= $t('admin.dest_from') ?>">
+          <input name="dest_to[]" value="<?= Web::e($d['to']) ?>" maxlength="32" placeholder="<?= $t('admin.dest_to_ph') ?>" aria-label="<?= $t('admin.dest_to') ?>">
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <p><button class="btn secondary" type="button" id="dest-add"><?= $t('admin.dest_add') ?></button>
+      <button class="btn" type="submit"><?= $t('admin.save') ?></button></p>
+  </form>
+  <?php if ($destSeen): ?>
+    <h3 class="sub"><?= $t('admin.dest_seen') ?></h3>
+    <table class="table dest-seen"><tbody>
+      <?php foreach ($destSeen as $d):
+          $variants = array_values(array_filter(explode('|', (string) $d['variants']), static fn ($x) => $x !== ''));
+          $merged = $d['ck'] !== $d['rk']; ?>
+        <tr><td><?= Web::e(implode(' · ', $variants)) ?>
+            <?php if ($d['ck'] === Destinations::UNKNOWN): ?><span class="type"><?= $t('admin.dest_is_unknown') ?></span>
+            <?php elseif ($merged): ?><span class="type">→ <?= Web::e(Destinations::label((string) $d['ck'], '', $destMap)) ?></span><?php endif; ?></td>
+          <td class="r"><?= $t('routes.vessels_n', ['n' => (int) $d['vessels']]) ?></td>
+          <td class="r"><?php if (!$merged && $d['ck'] !== Destinations::UNKNOWN && !isset($destMap[$d['rk']])): ?><button type="button" class="btn secondary dest-use" data-variants="<?= Web::e(implode(', ', $variants)) ?>"><?= $t('admin.dest_use') ?></button><?php endif; ?></td></tr>
+      <?php endforeach; ?>
+    </tbody></table>
+  <?php endif; ?>
 </section>
 
 <section class="card" id="photos">

@@ -95,12 +95,24 @@ git pull                             # récupère la nouvelle version
 docker compose up -d --build         # reconstruit et redémarre (quelques secondes à une minute)
 ```
 
-Rechargez ensuite la page (Ctrl+F5 / Cmd+Maj+R si l'affichage n'a pas changé). La version figure en bas de page, les nouveautés dans [CHANGELOG.md](../CHANGELOG.md).
+Rechargez ensuite la page (Ctrl+F5 / Cmd+Maj+R si l'affichage n'a pas changé). La version figure en bas de page, les nouveautés dans l'[historique des versions](#historique-des-versions).
 
 - **Par prudence, faites une sauvegarde avant** (commande ci-dessous) : la mise à jour ne supprime rien, mais une sauvegarde ne coûte rien.
 - **`git pull` refuse** (« your local changes would be overwritten ») : vous avez modifié un fichier suivi. `git stash`, puis `git pull`, puis `git stash pop` pour récupérer votre modification ; vos données ne sont pas concernées.
 - **Revenir à une version précédente** : `git checkout v1.0.0-beta.3` (par exemple), puis `docker compose up -d --build`. Les évolutions de la base ne sont pas annulées : préférez restaurer une sauvegarde faite avant la mise à jour.
 - Seul `docker compose down -v` efface les données (le `-v` supprime le volume).
+
+## Historique des versions
+
+La plus récente en premier. Détail, corrections et évolutions de la base pour chaque version : [CHANGELOG.fr.md](CHANGELOG.fr.md) (français) · [CHANGELOG.md](../CHANGELOG.md) (English).
+
+| Version | Date | Nouveautés |
+|---|---|---|
+| 1.0.0-beta.5 | 30/09/2026 | Dictionnaire des destinations dans l'admin (ex. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`) ; destinations sans signification (`0`, `Q`…) affichées « Inconnue » ; clic sur une barre du graphique des navires pour en voir la liste ; portée maximale portée à 1 500 NM par défaut (propagation troposphérique), les positions lointaines devant être confirmées pour établir un record |
+| 1.0.0-beta.4 | 30/09/2026 | Un seul sélecteur de période pour toute la page, mémorisé ; actualisation automatique ; clic sur un type, un pavillon, une route ou une destination pour lister ses navires ; barres de flotte lisibles sur téléphone ; vos propres photos de navires, puis Wikimedia Commons / Wikidata ; installation pré-remplie depuis le `config.json` d'AIS-catcher ; corrections de la carte « Access blocked » et des graphiques vides |
+| 1.0.0-beta.3 | 29/09/2026 | Pavillon déduit du MMSI ; « pavillon rare » seulement à partir de 100 navires connus ; instructions AIS-catcher plus claires |
+| 1.0.0-beta.2 | 29/09/2026 | Correction de « Invalid form token » sous Docker ; durée d'installation indiquée ; vérification mémoire et disque dans `install.sh` |
+| 1.0.0-beta.1 | 29/09/2026 | Première version de test |
 
 ## Essayer avec des données simulées
 
@@ -125,6 +137,8 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 ## Bon à savoir
 
 - **Zones nommées** (page admin) : par défaut une route va d'un secteur à un autre (`SO → NE`). Ajoutez une écluse, un port ou une ville pour lire `Port → Écluse nord`.
+- **Dictionnaire des destinations** (page admin) : les équipages saisissent la destination librement (`FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`…). Regroupez les variantes d'un port sous un seul nom, par exemple `SAINT-MALO, ST-MALO, FR SML` → `FRSML`. Les valeurs sans signification (`0`, `Q`…) s'affichent « Inconnue ».
+- **Portée maximale plausible** (1 500 NM par défaut) : la propagation troposphérique peut amener des messages de plus de 1 000 NM. Au-delà de 50 NM, une position ne compte pour les records de portée que si le navire a été reçu peu avant à une position cohérente.
+- **Graphique des navires** : cliquez sur une barre pour voir la liste des navires de cette heure, ce jour ou ce mois.
 - **Photos** : dans l'ordre, votre propre photo (admin → Photos de navires, ou lien « Ajouter une photo » sur la fiche quand vous êtes connecté), puis une photo libre de Wikimedia Commons ou Wikidata (par IMO ou MMSI). Beaucoup de bateaux de pêche et de plaisance n'ont aucune photo libre : ajoutez la vôtre. MarineTraffic, VesselFinder et ShipSpotting sont proposés en liens : leurs conditions n'autorisent pas la récupération automatique de leurs photos.
 - **Carte « Access blocked »** ou **graphique vide après changement de période** : corrigés en 1.0.0-beta.4, mettez à jour puis rechargez la page.
-- **Vie privée** : l'historique des passages d'un plaisancier identifiable par MMSI peut être une donnée personnelle. Gardez la page sur le réseau local ; l'admin permet d'effacer un MMSI.

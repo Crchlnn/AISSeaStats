@@ -95,6 +95,20 @@ check('wikidata search empty', AISSeaStats\Enrich::parseSearchQid(['query' => ['
 check('wikidata P18 claim', AISSeaStats\Enrich::parseImageClaim(['claims' => ['P18' => [['mainsnak' => ['datavalue' => ['value' => 'Ship.jpg']]]]]]) === 'Ship.jpg');
 check('wikidata P18 path rejected', AISSeaStats\Enrich::parseImageClaim(['claims' => ['P18' => [['mainsnak' => ['datavalue' => ['value' => '../x.jpg']]]]]]) === null);
 
+// Declared destinations
+use AISSeaStats\Destinations;
+check('dest key strips punctuation', Destinations::key(' fr sml ') === 'FRSML' && Destinations::key('St.-Malo') === 'STMALO');
+check('dest junk is unknown', Destinations::key('0') === '?' && Destinations::key('Q') === '?' && Destinations::key('000') === '?' && Destinations::key('NONE') === '?' && Destinations::key('') === '?');
+check('dest real short ports kept', Destinations::key('BREHAT') === 'BREHAT' && Destinations::key('FRCER') === 'FRCER');
+$dict = Destinations::parseForm(['SAINT-MALO, ST-MALO; FR SML, 0', '', 'x'], ['frsml', 'FRCER', '']);
+check('dest form parsed', $dict === [['to' => 'FRSML', 'from' => ['SAINT-MALO', 'ST-MALO', 'FR SML']]]);
+$map = Destinations::map($dict);
+check('dest canonical via alias', Destinations::canonical('Saint Malo', $map) === 'FRSML' && Destinations::canonical('st-malo', $map) === 'FRSML');
+check('dest canonical untouched', Destinations::canonical('FRCER', $map) === 'FRCER' && Destinations::canonical('0', $map) === '?');
+[$dsql, $dparams] = Destinations::sql($map);
+check('dest sql parameters', substr_count($dsql, '?') - 1 === count($dparams) && end($dparams) === 'FRSML');
+check('dest label locode', Destinations::label('FRSML', 'fr sml', $map) === 'FRSML' && Destinations::label('BREHAT', 'Bréhat', []) === 'Bréhat');
+
 // Integration (database)
 if (getenv('DB_HOST')) {
     Db::waitReady(60);
@@ -134,6 +148,23 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     // A new message after the gap starts a second passage.
     (new Ingest($now + 4 * 3600))->process([['mmsi' => 244030470, 'type' => 1, 'rxuxtime' => $now + 4 * 3600, 'lat' => 51.87, 'lon' => 4.50]]);
     check('second passage after gap', (int) Db::value('SELECT passages FROM vessel WHERE mmsi = 244030470') === 2);
+    // Long range: a lone far position is kept for the track but not for range records;
+    // a second one shortly after, at a consistent place, counts (tropospheric ducting).
+    $far = static fn (int $t, float $lat): array => ['mmsi' => 227000001, 'type' => 1, 'rxuxtime' => $t, 'lat' => $lat, 'lon' => 4.4792, 'speed' => 12];
+    $r1 = (new Ingest($now + 5 * 3600))->process([$far($now + 5 * 3600, 60.0)]); // ~485 NM north
+    check('far lone position not a record', $r1['unconfirmed_range'] === 1 && Db::value('SELECT max_dist_nm FROM vessel WHERE mmsi = 227000001') === null);
+    $r2 = (new Ingest($now + 5 * 3600 + 120))->process([$far($now + 5 * 3600 + 120, 60.005)]);
+    $md = (float) Db::value('SELECT max_dist_nm FROM vessel WHERE mmsi = 227000001');
+    check('far confirmed position is a record', $r2['unconfirmed_range'] === 0 && $md > 480 && $md < 490);
+    check('far range in polar', (float) Db::value('SELECT MAX(max_dist_nm) FROM range_polar') > 480);
+    $r3 = (new Ingest($now + 6 * 3600))->process([['mmsi' => 227000002, 'type' => 1, 'rxuxtime' => $now + 6 * 3600, 'lat' => -40.0, 'lon' => 4.4792]]);
+    check('beyond max range rejected', $r3['rejected_positions'] === 1);
+    // Destinations grouped in SQL with the dictionary.
+    Db::run("UPDATE vessel SET destination = 'SAINT-MALO' WHERE mmsi = 244030470");
+    Db::run("UPDATE vessel SET destination = 'Q' WHERE mmsi = 227000001");
+    [$dsql, $dparams] = Destinations::sql($map);
+    check('dest sql alias', Db::value("SELECT {$dsql} FROM vessel WHERE mmsi = 244030470", $dparams) === 'FRSML');
+    check('dest sql junk', Db::value("SELECT {$dsql} FROM vessel WHERE mmsi = 227000001", $dparams) === '?');
     // Photos: Commons empty for the IMO, then Wikidata by IMO finds an image.
     AISSeaStats\Db::pdo()->exec('TRUNCATE TABLE photo_lookup');
     AISSeaStats\Db::pdo()->exec('TRUNCATE TABLE vessel_photo');

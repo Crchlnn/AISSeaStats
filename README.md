@@ -4,7 +4,7 @@ Long-term statistics for your [AIS-catcher](https://github.com/jvde-github/AIS-c
 
 AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it into one simple page:
 
-- **Vessels seen** per hour, day and month
+- **Vessels seen** per hour, day and month; click a bar to list them
 - **Top routes**, inferred from where each vessel enters and leaves your coverage, drawn on a map
 - **Top vessels** by passages, days seen, length, speed and distance
 - **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
@@ -131,12 +131,24 @@ git pull                             # get the new version
 docker compose up -d --build         # rebuild and restart (a few seconds to a minute)
 ```
 
-Then reload the page (Ctrl+F5 / Cmd+Shift+R if the look did not change). Check the version at the bottom of the page and what changed in [CHANGELOG.md](CHANGELOG.md).
+Then reload the page (Ctrl+F5 / Cmd+Shift+R if the look did not change). Check the version at the bottom of the page and what changed in [Version history](#version-history).
 
 - **Backup first, if you want to be safe** (see the table below): an upgrade does not delete data, but a backup costs nothing.
 - **`git pull` refuses to run** ("your local changes would be overwritten"): you edited a tracked file. `git stash`, then `git pull`, then `git stash pop` if you want your change back; your data is not affected.
 - **Going back to a previous version**: `git checkout v1.0.0-beta.3` (for example), then `docker compose up -d --build`. Database changes are not rolled back, so prefer restoring a backup taken before the upgrade.
 - Only `docker compose down -v` deletes the data (the `-v` removes the volume).
+
+## Version history
+
+Newest first. Details, fixes and database changes for each version: [CHANGELOG.md](CHANGELOG.md) (English) · [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md) (français).
+
+| Version | Date | What's new |
+|---|---|---|
+| 1.0.0-beta.5 | 2026-09-30 | Destination dictionary in the admin (e.g. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`); meaningless destinations (`0`, `Q`…) shown as *Unknown*; click a bar of the vessel chart to list its vessels; maximum range raised to 1,500 NM by default (tropospheric ducting), with far positions confirmed before they set a record |
+| 1.0.0-beta.4 | 2026-09-30 | One period selector for the whole page, remembered; automatic refresh; click a type, flag, route or destination to list its vessels; readable fleet bars on phones; your own vessel photos, then Wikimedia Commons / Wikidata; setup pre-filled from AIS-catcher's `config.json`; fixes for map tiles "Access blocked" and empty charts |
+| 1.0.0-beta.3 | 2026-09-29 | Flag derived from the MMSI; "rare flag" only once 100 vessels are known; clearer AIS-catcher instructions |
+| 1.0.0-beta.2 | 2026-09-29 | Fix for "Invalid form token" in Docker; install time documented; memory and disk checks in `install.sh` |
+| 1.0.0-beta.1 | 2026-09-29 | First test version |
 
 ## Everyday commands
 
@@ -153,9 +165,13 @@ Then reload the page (Ctrl+F5 / Cmd+Shift+R if the look did not change). Check t
 
 ## Admin page
 
-`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, vessel photos, token rotation, password, deletion of one vessel's data (GDPR requests) or of everything.
+`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, destination dictionary, vessel photos, token rotation, password, deletion of one vessel's data or of everything.
 
 **Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`SW → NE`). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
+
+**Destination dictionary.** Crews type the destination freely: `FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`… Group the spellings of a port under one name (for example `SAINT-MALO, ST-MALO, FR SML` → `FRSML`). The admin lists the destinations received in the last 90 days to help. Meaningless values such as `0` or `Q` are shown as *Unknown*.
+
+**Maximum plausible range** (1,500 NM by default): tropospheric ducting can bring messages from over 1,000 NM. Beyond 50 NM, a position only counts for range records when the same vessel was received shortly before at a consistent position, so a single corrupted message cannot set a record.
 
 ## Photos
 
@@ -176,14 +192,14 @@ Free photos are shown with author and licence and cached 30 days. Many fishing b
 | Map tiles show "Access blocked" | Upgrade to 1.0.0-beta.4 or later (the page now sends the Referer that OpenStreetMap requires), or set another tile server in the admin. |
 | A chart stays empty after switching period | Upgrade to 1.0.0-beta.4 or later, then reload the page. |
 
-## Security and privacy
+## Security
 
 - Designed for a home network. Do not expose it to the Internet without a reverse proxy with authentication and TLS.
 - Ingestion requires the token (HTTP Basic or Bearer), compared in constant time; payload size is capped; every query is parameterised.
 - The stats page is read-only. The admin uses a hashed password, CSRF tokens and `SameSite=Strict` cookies. A strict Content-Security-Policy is sent; JavaScript libraries are bundled.
 - Complete the setup wizard right after installing: until then, anyone on your network could do it.
 - `INGEST_ALLOW` in `.env` can restrict ingestion to given networks.
-- An MMSI can identify a private boat owner, so the history of passages can be personal data. Keep the page private, and use the admin to delete a vessel's data on request. Radio reception and redistribution of AIS data depend on local regulations.
+- Radio reception and redistribution of AIS data depend on local regulations.
 
 ## Development
 

@@ -22,7 +22,7 @@ final class Settings
             'station_lon' => null,
             'timezone' => Db::env('TZ', 'Europe/Paris'),
             'lang' => 'auto',
-            'max_range_nm' => 200,
+            'max_range_nm' => 1500,
             'passage_gap_min' => 120,
             'position_retention_days' => 30,
             'enrich_enabled' => true,

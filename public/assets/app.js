@@ -224,6 +224,14 @@
       if (data.period === 'month') { return fmtMonth.format(new Date(p.t + '-01T00:00:00Z')); }
       return fmtDayShort.format(new Date(p.t + 'T00:00:00Z'));
     });
+    function barTitle(i) {
+      var p = s[i];
+      if (data.period === 'hour') {
+        return fmtDateTime.format(new Date(p.t * 1000)) + ' – ' + fmtHour.format(new Date((p.t + 3600) * 1000));
+      }
+      if (data.period === 'month') { return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(p.t + '-01T00:00:00Z')); }
+      return new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(p.t + 'T00:00:00Z'));
+    }
     var color = css('--series-1');
     makeChart('chart-counts', {
       type: 'bar',
@@ -248,14 +256,7 @@
           legend: { display: false },
           tooltip: {
             callbacks: {
-              title: function (items) {
-                var p = s[items[0].dataIndex];
-                if (data.period === 'hour') {
-                  return fmtDateTime.format(new Date(p.t * 1000)) + ' – ' + fmtHour.format(new Date((p.t + 3600) * 1000));
-                }
-                if (data.period === 'month') { return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(p.t + '-01T00:00:00Z')); }
-                return new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(p.t + 'T00:00:00Z'));
-              },
+              title: function (items) { return barTitle(items[0].dataIndex); },
               label: function (item) { return ' ' + t('counts.vessels_n', { n: num(item.raw) }); },
               afterBody: function (items) {
                 var p = s[items[0].dataIndex];
@@ -283,6 +284,17 @@
             }
           } : { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
           y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0 }, title: { display: true, text: t('counts.axis') } }
+        },
+        // Click a bar to list the vessels of that hour, day or month.
+        onClick: function (evt, elements) {
+          if (!elements.length) { return; }
+          var i = elements[0].index, p = s[i];
+          if (!p || !p.vessels) { return; }
+          showList(data.period === 'hour' ? { by: 'hour', t: p.t } : { by: data.period, value: p.t }, barTitle(i));
+        },
+        onHover: function (evt, elements) {
+          var p = elements.length ? s[elements[0].index] : null;
+          evt.native.target.style.cursor = p && p.vessels ? 'pointer' : 'default';
         }
       }
     });
@@ -612,8 +624,6 @@
   // ---------- Vessel list (a type, a flag, a route, a destination) ----------
   function periodLabel() { return t('range.label.' + state.range); }
   function openList(el) {
-    var dlg = $('list-dialog');
-    var body = $('ld-body');
     var kind = el.getAttribute('data-list');
     var params = { by: kind, days: range().days };
     if (kind === 'route') {
@@ -622,16 +632,25 @@
     } else {
       params.value = el.getAttribute('data-value');
     }
-    var title = el.getAttribute('data-title');
+    showList(params, el.getAttribute('data-title'));
+  }
+  // Lists for one bar of the vessel chart (an hour, a day or a month) carry their own time span.
+  var TIME_LISTS = { hour: 1, day: 1, month: 1 };
+  function showList(params, title) {
+    var dlg = $('list-dialog');
+    var body = $('ld-body');
+    var kind = params.by;
+    var timed = TIME_LISTS[kind] === 1;
     body.innerHTML = '<p class="muted">' + esc(t('status.loading')) + '</p>';
     if (!dlg.open) { dlg.showModal(); }
     api('list', params).then(function (d) {
       var rows = d.rows || [];
       var head = '<div class="vd-head"><div><h2 id="ld-title">' + esc(title) + '</h2>' +
-        '<p class="muted small">' + esc(t('list.subtitle', { n: num(rows.length), p: periodLabel() })) + '</p></div>' +
+        '<p class="muted small">' + esc(timed ? t('list.subtitle_bar', { n: num(rows.length) }) : t('list.subtitle', { n: num(rows.length), p: periodLabel() })) + '</p></div>' +
         '<button type="button" class="icon-btn ld-close" aria-label="' + esc(t('vessel.close')) + '">✕</button></div>';
       var table = rows.length ? '<table class="table"><tbody>' + rows.map(function (v) {
-        var right = kind === 'route' ? t('top.passages_n', { n: num(v.passages) }) : fmtDateTime.format(new Date(v.last_seen * 1000));
+        var right = kind === 'route' ? t('top.passages_n', { n: num(v.passages) })
+          : (v.msgs != null ? t('counts.msgs_n', { n: num(v.msgs) }) : fmtDateTime.format(new Date(v.last_seen * 1000)));
         return '<tr><td><span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' + vlink(v) +
           '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') + '</span></td>' +
           '<td class="r">' + esc(right) + '</td></tr>';

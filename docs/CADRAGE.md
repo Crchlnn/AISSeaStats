@@ -151,7 +151,7 @@ AISSeaStats/
 | `enrich_cache` | photo et métadonnées Commons par IMO/MMSI | 30 jours |
 | `setting`, `ingest_log` | configuration, journal des lots | permanente / 7 jours |
 
-Qualité : positions sentinelles ignorées, portée au-delà d'un seuil (défaut 200 NM) exclue des records, sauts de position invraisemblables rejetés, sortie HTML toujours échappée.
+Qualité : positions sentinelles ignorées, positions au-delà d'une portée plausible (défaut 1 500 NM, la propagation troposphérique peut dépasser 1 000 NM) ignorées, au-delà de 50 NM une position ne compte pour les records de portée que si elle est confirmée par une position précédente cohérente du même navire, sauts de position invraisemblables rejetés, sortie HTML toujours échappée.
 
 Volumétrie indicative : positions à 1 par minute et par navire sur 30 jours = quelques centaines de Mo au plus ; le reste sous 100 Mo par an.
 
@@ -176,7 +176,6 @@ Prérequis : OS 64 bits (l'image officielle MariaDB n'existe pas en armv7).
 - `ingest.php` : POST uniquement, jeton comparé à temps constant, taille de lot plafonnée, JSON validé, requêtes préparées.
 - Interface en lecture seule ; administration protégée par mot de passe haché, CSRF, cookies `HttpOnly` + `SameSite=Strict`.
 - CSP stricte, bibliothèques JS embarquées ; seules exceptions : tuiles de carte (OpenStreetMap, URL configurable) et Wikimedia (désactivable).
-- Données personnelles : l'historique des passages d'un plaisancier identifiable par MMSI relève du RGPD ; accès réservé au réseau local par défaut, suppression d'un MMSI possible depuis l'admin.
 
 ## 12. Planning
 

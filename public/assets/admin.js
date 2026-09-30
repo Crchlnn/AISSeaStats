@@ -44,3 +44,26 @@
     document.getElementById('zone_name').focus();
   });
 })();
+
+/* Destination dictionary: add rows, and start a row from destinations already received. */
+(function () {
+  'use strict';
+  var rows = document.getElementById('dest-rows');
+  if (!rows) { return; }
+  function addRow(from) {
+    var last = rows.querySelector('.dest-row:last-child');
+    var row = last.cloneNode(true);
+    Array.prototype.forEach.call(row.querySelectorAll('input'), function (i) { i.value = ''; });
+    var empty = last.querySelector('input').value === '' && last.querySelectorAll('input')[1].value === '';
+    var target = empty ? last : rows.appendChild(row);
+    if (from) { target.querySelector('input').value = from; }
+    target.querySelectorAll('input')[from ? 1 : 0].focus();
+  }
+  document.getElementById('dest-add').addEventListener('click', function () { addRow(''); });
+  Array.prototype.forEach.call(document.querySelectorAll('.dest-use'), function (b) {
+    b.addEventListener('click', function () {
+      addRow(b.getAttribute('data-variants'));
+      document.getElementById('destinations').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+})();

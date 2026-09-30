@@ -9,6 +9,7 @@ declare(strict_types=1);
 require __DIR__ . '/../src/bootstrap.php';
 
 use AISSeaStats\Db;
+use AISSeaStats\Destinations;
 use AISSeaStats\Enrich;
 use AISSeaStats\Settings;
 use AISSeaStats\Web;
@@ -32,7 +33,6 @@ $today = (new DateTimeImmutable('@' . $now))->setTimezone($tz)->setTime(0, 0);
 $sinceDay = $today->modify('-' . ($days - 1) . ' days');
 $sinceTs = $sinceDay->getTimestamp();
 const INFRA = "('BASE','ATON')";
-const DEST_KEY = "REGEXP_REPLACE(UPPER(TRIM(destination)), '[^A-Z0-9]', '')";
 const TYPE_CATS = [
     'cargo' => 'shiptype BETWEEN 70 AND 79',
     'tanker' => 'shiptype BETWEEN 80 AND 89',
@@ -199,13 +199,15 @@ function routes(int $sinceTs): array
         FROM passage
         WHERE closed = 1 AND start_ts >= ? AND moved_nm >= 0.5 AND entry_zone IS NOT NULL AND exit_zone IS NOT NULL
         GROUP BY entry_zone, exit_zone ORDER BY passages DESC LIMIT 10", [$sinceTs]);
-    // "FR SML", "FRSML" and "fr-sml" are the same destination: group on letters and digits only.
-    $dest = Db::all("SELECT " . DEST_KEY . " AS dkey, MAX(UPPER(TRIM(destination))) AS label, COUNT(*) AS vessels FROM vessel
+    // "FR SML", "SAINT-MALO", "ST.MALO"… grouped on one key (letters and digits, owner's dictionary);
+    // meaningless values such as "0" or "Q" are grouped as "unknown".
+    $map = Destinations::map();
+    [$dkey, $dparams] = Destinations::sql($map);
+    $dest = Db::all("SELECT {$dkey} AS dkey, MAX(UPPER(TRIM(destination))) AS label, COUNT(*) AS vessels FROM vessel
         WHERE last_seen >= ? AND destination IS NOT NULL AND destination <> ''
-        GROUP BY dkey HAVING dkey <> '' ORDER BY vessels DESC, dkey LIMIT 10", [$sinceTs]);
+        GROUP BY dkey ORDER BY (dkey = '?'), vessels DESC, dkey LIMIT 10", array_merge($dparams, [$sinceTs]));
     foreach ($dest as &$d) {
-        // A UN/LOCODE (2 letters + 3 characters) reads best without spaces.
-        $d['destination'] = preg_match('/^[A-Z]{2}[A-Z0-9]{3}$/', (string) $d['dkey']) ? $d['dkey'] : $d['label'];
+        $d['destination'] = Destinations::label((string) $d['dkey'], (string) $d['label'], $map);
         unset($d['label']);
     }
     unset($d);
@@ -381,9 +383,32 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
                 [$sinceTs, mb_substr((string) ($_GET['from'] ?? ''), 0, 48), mb_substr((string) ($_GET['to'] ?? ''), 0, 48)]);
             break;
         case 'dest':
-            $key = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['value'] ?? '')));
-            $rows = Db::all("SELECT {$cols}, v.destination FROM vessel v WHERE v.last_seen >= ? AND " . DEST_KEY
-                . ' = ? ORDER BY v.last_seen DESC LIMIT 300', [$sinceTs, $key]);
+            $value = (string) ($_GET['value'] ?? '');
+            $key = $value === Destinations::UNKNOWN ? $value : strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $value));
+            [$dkey, $dparams] = Destinations::sql();
+            $rows = Db::all("SELECT {$cols}, v.destination FROM vessel v WHERE v.last_seen >= ? AND destination IS NOT NULL
+                AND destination <> '' AND {$dkey} = ? ORDER BY v.last_seen DESC LIMIT 300", array_merge([$sinceTs], $dparams, [$key]));
+            break;
+        case 'hour':
+            // One bar of the 48 h chart (hourly detail is kept 35 days).
+            $h = (int) ($_GET['t'] ?? 0);
+            if ($h <= 0 || $h % 3600 !== 0) {
+                Web::json(['error' => 'bad hour'], 400);
+            }
+            $rows = Db::all("SELECT {$cols} FROM vessel_hourly h JOIN vessel v ON v.mmsi = h.mmsi
+                WHERE h.hour_ts = ? ORDER BY v.name IS NULL, v.name, v.mmsi LIMIT 300", [$h]);
+            break;
+        case 'day':
+        case 'month':
+            // One bar of the daily or monthly chart.
+            $value = (string) ($_GET['value'] ?? '');
+            if ($by === 'day' ? !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) : !preg_match('/^\d{4}-\d{2}$/', $value)) {
+                Web::json(['error' => 'bad date'], 400);
+            }
+            $first = $by === 'day' ? $value : $value . '-01';
+            $last = $by === 'day' ? $value : date('Y-m-t', (int) strtotime($first . ' 00:00:00 UTC'));
+            $rows = Db::all("SELECT {$cols}, SUM(d.msgs) AS msgs FROM vessel_daily d JOIN vessel v ON v.mmsi = d.mmsi
+                WHERE d.day BETWEEN ? AND ? GROUP BY d.mmsi ORDER BY msgs DESC, v.mmsi LIMIT 300", [$first, $last]);
             break;
         default:
             Web::json(['error' => 'unknown list'], 400);

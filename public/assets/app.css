@@ -336,3 +336,9 @@ pre.cmd {
 
 /* No grey/blue flash on tap (phones) for clickable rows */
 .bar-row, .vlink, .rank li.clickable, .seg button { -webkit-tap-highlight-color: transparent; }
+
+/* Admin: destination dictionary */
+.dest-rows { display: grid; gap: 8px; margin-bottom: 4px; }
+.dest-row, .dest-head { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.dest-row input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); width: 100%; }
+.dest-seen .btn { padding: 4px 10px; font-size: 13px; }

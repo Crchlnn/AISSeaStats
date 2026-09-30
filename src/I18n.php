@@ -50,6 +50,10 @@ final class I18n
     /** @param array<string, string|int|float> $vars */
     public static function t(string $key, array $vars = []): string
     {
+        // Singular form "<key>.one" when the count is 1 (same rule as the page script).
+        if (isset($vars['n']) && (int) preg_replace('/\D/', '', (string) $vars['n']) === 1 && isset(self::dict()[$key . '.one'])) {
+            $key .= '.one';
+        }
         $s = self::dict()[$key] ?? $key;
         foreach ($vars as $k => $v) {
             $s = str_replace('{' . $k . '}', (string) $v, $s);

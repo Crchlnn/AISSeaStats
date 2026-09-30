@@ -17,6 +17,9 @@ final class Ingest
     private const POSITION_TYPES = [1, 2, 3, 4, 9, 18, 19, 21, 27];
     private const MAX_PLAUSIBLE_KN = 70.0;
     private const MAX_PLAUSIBLE_AIR_KN = 350.0;
+    /** Beyond this distance a position only counts for range records when confirmed by a previous one. */
+    public const RANGE_CONFIRM_NM = 50.0;
+    private const RANGE_CONFIRM_S = 1800;
 
     private int $now;
     private ?float $stLat = null;
@@ -47,7 +50,7 @@ final class Ingest
     private array $dayCache = [];
 
     /** @var array{received:int, accepted:int, rejected_positions:int, vessels:int} */
-    private array $stats = ['received' => 0, 'accepted' => 0, 'rejected_positions' => 0, 'vessels' => 0];
+    private array $stats = ['received' => 0, 'accepted' => 0, 'rejected_positions' => 0, 'unconfirmed_range' => 0, 'vessels' => 0];
 
     public function __construct(?int $now = null)
     {
@@ -310,18 +313,22 @@ final class Ingest
         }
 
         $isAir = $type === 9 || $v['vclass'] === 'SAR';
+        $maxKn = $isAir ? self::MAX_PLAUSIBLE_AIR_KN : self::MAX_PLAUSIBLE_KN;
         $prevTs = $v['last_pos_ts'] !== null ? (int) $v['last_pos_ts'] : null;
         $step = 0.0;
+        $confirmed = false;
         if ($prevTs !== null && $v['last_lat'] !== null) {
             $step = Geo::distanceNm((float) $v['last_lat'], (float) $v['last_lon'], $lat, $lon);
             $dt = $ts - $prevTs;
             if ($dt > 0 && $dt <= 600 && $step > 1.0) {
                 $implied = $step / ($dt / 3600);
-                if ($implied > ($isAir ? self::MAX_PLAUSIBLE_AIR_KN : self::MAX_PLAUSIBLE_KN)) {
+                if ($implied > $maxKn) {
                     $this->stats['rejected_positions']++;
                     return;
                 }
             }
+            // A previous position of the same vessel, recent and reachable at a plausible speed.
+            $confirmed = $dt > 0 && $dt <= self::RANGE_CONFIRM_S && $step <= max(1.0, $maxKn * $dt / 3600);
             if ($ts < $prevTs) {
                 $step = 0.0; // late message: do not add travel distance
             }
@@ -353,6 +360,12 @@ final class Ingest
         $minute = intdiv($ts, 60);
         $this->positions[$mmsi . ':' . $minute] ??= [$mmsi, $minute, round($lat, 6), round($lon, 6), $sog, $cog];
 
+        // Long range (tropospheric ducting) is real but so are corrupted positions:
+        // a far position feeds the range records only once confirmed by the vessel's previous one.
+        if ($dist !== null && $dist > self::RANGE_CONFIRM_NM && !$confirmed) {
+            $dist = null;
+            $this->stats['unconfirmed_range']++;
+        }
         if ($dist !== null) {
             $dist = round($dist, 2);
             if ($v['max_dist_nm'] === null || $dist > (float) $v['max_dist_nm']) {

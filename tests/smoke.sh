@@ -54,6 +54,26 @@ curl -s "$BASE/api.php?q=routes&days=30" | grep -q '"dkey":"FRSML","vessels":2,"
 curl -s "$BASE/api.php?q=list&by=dest&value=FRSML&days=30" | grep -o '"mmsi":22700010[12]' | sort -u | wc -l | grep -q 2 || fail "destination list incomplete"
 curl -s "$BASE/api.php?q=list&by=flag&value=FR&days=30" | grep -q '"mmsi":227000101' || fail "flag list missing vessel"
 
+# Destination dictionary saved from the admin; meaningless destinations are "unknown".
+res=$(printf '{"msgs":[{"mmsi":227000103,"type":5,"shipname":"CHARLIE","destination":"SAINT-MALO"},{"mmsi":227000104,"type":5,"shipname":"DELTA","destination":"0"}]}' |
+  curl -s -u "aisseastats:${ingest}" --data-binary @- "$BASE/ingest.php")
+echo "$res" | grep -q '"ok":true' || fail "ingestion of destinations rejected: $res"
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=dest_aliases \
+  --data-urlencode "dest_from[]=Saint-Malo, ST-MALO" --data-urlencode "dest_to[]=FRSML" \
+  --data-urlencode "dest_from[]=" --data-urlencode "dest_to[]=" "$BASE/admin.php"
+curl -s "$BASE/api.php?q=routes&days=30" | grep -q '"dkey":"FRSML","vessels":3' || fail "destination dictionary not applied"
+curl -s "$BASE/api.php?q=list&by=dest&value=%3F&days=30" | grep -q '"mmsi":227000104' || fail "unknown destination list missing vessel"
+
+# Click on a bar of the vessel chart: vessels of one hour, one day, one month.
+hour=$(( $(date +%s) / 3600 * 3600 ))
+curl -s "$BASE/api.php?q=list&by=hour&t=${hour}" | grep -q '"mmsi":244030470' || fail "hour list missing vessel"
+day=$(TZ=Europe/Amsterdam date +%F)
+curl -s "$BASE/api.php?q=list&by=day&value=${day}" | grep -q '"mmsi":244030470' || fail "day list missing vessel"
+curl -s "$BASE/api.php?q=list&by=month&value=$(echo "$day" | cut -c1-7)" | grep -q '"mmsi":244030470' || fail "month list missing vessel"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api.php?q=list&by=hour&t=123")
+[ "$code" = "400" ] || fail "bad hour accepted ($code)"
+
 # Admin photo upload, then served by photo.php and preferred by the photo look-up.
 PNG=$(mktemp)
 echo "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGOQi1pFEmIY1TCqYfhqAAChBSIQbP1etQAAAABJRU5ErkJggg==" | base64 -d > "$PNG"
