@@ -176,6 +176,7 @@ final class Worker
         self::deleteChunked('DELETE FROM position WHERE minute < ? LIMIT 5000', [intdiv($now - $days * 86400, 60)]);
         self::deleteChunked('DELETE FROM vessel_hourly WHERE hour_ts < ? LIMIT 5000', [$now - 35 * 86400]);
         self::deleteChunked('DELETE FROM ingest_log WHERE ts < ? LIMIT 5000', [$now - 7 * 86400]);
+        Debug::purge($now);
     }
 
     /** @param array<int, mixed> $params */

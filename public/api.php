@@ -157,7 +157,7 @@ function counts(string $period, DateTimeImmutable $today, int $now, int $days = 
             $k = $m->format('Y-m');
             $out[] = ['t' => $k, 'vessels' => $v[$k] ?? 0, 'msgs' => $msgs[$k] ?? 0];
         }
-        return ['period' => 'month', 'series' => trim_leading($out)];
+        return ['period' => 'month', 'series' => $out];
     }
     $from = $today->modify('-' . (max(7, min(366, $days)) - 1) . ' days');
     $rows = [];
@@ -174,20 +174,7 @@ function counts(string $period, DateTimeImmutable $today, int $now, int $days = 
             'range' => isset($rows[$k]['max_dist_nm']) ? (float) $rows[$k]['max_dist_nm'] : null,
         ];
     }
-    return ['period' => 'day', 'series' => trim_leading($out)];
-}
-
-/**
- * Drop leading empty periods so a new station does not show months of zeros.
- * @param array<int, array<string, mixed>> $series
- * @return array<int, array<string, mixed>>
- */
-function trim_leading(array $series): array
-{
-    while (count($series) > 7 && $series[0]['vessels'] === 0 && $series[0]['msgs'] === 0) {
-        array_shift($series);
-    }
-    return $series;
+    return ['period' => 'day', 'series' => $out];
 }
 
 /** @return array<string, mixed> */

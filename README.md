@@ -152,6 +152,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.0.0-beta.7 | 2026-09-30 | Debug capture of raw messages in the admin; explanation when a vessel's name has not been received; 30/90-day charts always show the whole period |
 | 1.0.0-beta.6 | 2026-09-30 | Alerts when reception stops, and when it comes back: ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) and e-mail, with a test button; optional heartbeat URL to detect a station that is off; type of inland vessels from Inland AIS data; clearer database size in the admin |
 | 1.0.0-beta.5 | 2026-09-30 | Destination dictionary in the admin (e.g. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`); meaningless destinations (`0`, `Q`…) shown as *Unknown*; click a bar of the vessel chart to list its vessels; maximum range raised to 1,500 NM by default (tropospheric ducting), with far positions confirmed before they set a record |
 | 1.0.0-beta.4 | 2026-09-30 | One period selector for the whole page, remembered; automatic refresh; click a type, flag, route or destination to list its vessels; readable fleet bars on phones; your own vessel photos, then Wikimedia Commons / Wikidata; setup pre-filled from AIS-catcher's `config.json`; fixes for map tiles "Access blocked" and empty charts |
@@ -215,6 +216,7 @@ Free photos are shown with author and licence and cached 30 days. Many fishing b
 | Admin shows "token rejected" | The credentials in AIS-catcher do not match: generate a new token in the admin and paste `aisseastats:<token>` again. |
 | Map tiles show "Access blocked" | Upgrade to 1.0.0-beta.4 or later (the page now sends the Referer that OpenStreetMap requires), or set another tile server in the admin. |
 | A chart stays empty after switching period | Upgrade to 1.0.0-beta.4 or later, then reload the page. |
+| A vessel has an MMSI but no name | The name only comes in the vessel's identity message (AIS type 5, or 24 for class B), sent every 6 minutes and longer than a position report, so it is the first lost at the edge of range. In the admin, **Debug: received messages** records what AIS-catcher sends for that MMSI and shows which message types arrive. |
 | The admin shows a few MB of data but the database folder takes over 100 MB | Normal. The admin shows the statistics themselves; MariaDB's folder also holds fixed-size files, mainly its 96 MB transaction log. Only the data part grows over time. |
 
 ## Security

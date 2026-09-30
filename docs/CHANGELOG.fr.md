@@ -2,6 +2,17 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.0.0-beta.7 — 30/09/2026
+
+Nouveautés
+- Admin, « Débogage : messages reçus » : enregistre les messages bruts de quelques navires (ou de tous pendant 1 heure), les affiche par navire et par type AIS, et les télécharge en JSON. S'arrête tout seul ; effacé après 7 jours
+- Fiche navire : quand le nom manque, explique qu'il n'a pas encore été reçu (message d'identité AIS type 5 ou 24)
+
+Changements
+- Graphique des navires : 30 et 90 jours affichent toujours 30 et 90 barres, et 1 an 12 mois, même sur une station récente (les jours vides ne sont plus masqués)
+
+Base de données : migration 004 (table de capture de débogage), appliquée automatiquement.
+
 ## 1.0.0-beta.6 — 30/09/2026
 
 Nouveautés

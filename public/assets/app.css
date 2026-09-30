@@ -352,3 +352,9 @@ pre.cmd {
 .alert-ch .field { align-content: start; }
 .field .check { margin: 2px 0 0; font-size: 13px; font-weight: 400; }
 .field .check input { width: auto; margin: 0; }
+/* Admin: debug capture */
+.debug-list details { border-bottom: 1px solid var(--grid); padding: 6px 0; font-size: 13px; }
+.debug-list summary { cursor: pointer; font-variant-numeric: tabular-nums; }
+.debug-list pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--surface-2); padding: 8px 10px; border-radius: 8px; max-height: 320px; overflow: auto; }
+.debug-summary .chip { margin: 2px 4px 2px 0; }
+.vd-noname { margin-top: 10px; }

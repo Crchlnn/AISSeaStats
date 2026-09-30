@@ -7,6 +7,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use AISSeaStats\Alert;
 use AISSeaStats\Db;
+use AISSeaStats\Debug;
 use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
 use AISSeaStats\Page;
@@ -63,6 +64,18 @@ if (!Web::isAdmin()) {
         . '<p><button class="btn" type="submit">' . $t('admin.login_btn') . '</button></p>'
         . '<p class="muted small">' . $t('admin.lost_password') . '</p></form></section>';
     Page::close();
+    exit;
+}
+
+// ---------- Debug capture download (JSON lines) ----------
+if (isset($_GET['debug_export'])) {
+    header('Content-Type: application/x-ndjson; charset=utf-8');
+    header('Content-Disposition: attachment; filename="aisseastats-debug-' . date('Ymd-His') . '.jsonl"');
+    header('X-Content-Type-Options: nosniff');
+    $st = Db::pdo()->query('SELECT raw FROM debug_msg ORDER BY id');
+    while (($raw = $st->fetchColumn()) !== false) {
+        echo $raw, "\n";
+    }
     exit;
 }
 
@@ -226,6 +239,25 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 }
                 break;
 
+            case 'debug_start':
+                $list = Debug::parseMmsi((string) ($_POST['debug_mmsi'] ?? ''));
+                if (trim((string) ($_POST['debug_mmsi'] ?? '')) !== '' && $list === []) {
+                    throw new InvalidArgumentException(I18n::t('admin.debug_bad_mmsi'));
+                }
+                Debug::start($list, (int) ($_POST['debug_hours'] ?? 1), time());
+                $flash[] = ['ok', I18n::t('admin.debug_started')];
+                break;
+
+            case 'debug_stop':
+                Debug::stop();
+                $flash[] = ['ok', I18n::t('admin.debug_stopped')];
+                break;
+
+            case 'debug_clear':
+                Debug::clear();
+                $flash[] = ['ok', I18n::t('admin.debug_cleared')];
+                break;
+
             case 'reset_data':
                 if (($_POST['confirm'] ?? '') !== 'RESET') {
                     throw new InvalidArgumentException(I18n::t('admin.reset_confirm_needed'));
@@ -300,7 +332,8 @@ $form = static fn (string $action): string => '<input type="hidden" name="csrf" 
 Page::open(I18n::t('nav.admin'), true);
 // Messages of the alerts form are shown in its own card (the form returns to #alerts).
 $alertFlash = $action === 'alerts' ? $flash : [];
-foreach ($action === 'alerts' ? [] : $flash as [$k, $m]) {
+$debugFlash = str_starts_with($action, 'debug_') ? $flash : [];
+foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flash as [$k, $m]) {
     echo '<p class="notice ' . $k . '">' . Web::e($m) . '</p>';
 }
 ?>
@@ -611,6 +644,61 @@ foreach ($action === 'alerts' ? [] : $flash as [$k, $m]) {
     </div>
     <p><button class="btn" type="submit"><?= $t('admin.save') ?></button></p>
   </form>
+</section>
+
+<section class="card" id="debug">
+  <h2><?= $t('admin.debug') ?></h2>
+  <p class="muted small"><?= $t('admin.debug_help') ?></p>
+  <?php foreach ($debugFlash as [$k, $m]): ?><p class="notice <?= $k ?>"><?= Web::e($m) ?></p><?php endforeach; ?>
+  <?php
+    $dc = Debug::config();
+    $dActive = Debug::active($dc, $now);
+    $dCount = (int) Db::value('SELECT COUNT(*) FROM debug_msg');
+    $dSummary = $dCount > 0 ? Debug::summary() : [];
+    $dLast = $dCount > 0 ? Db::all('SELECT ts, mmsi, type, raw FROM debug_msg ORDER BY id DESC LIMIT 40') : [];
+    $fmtTs = static fn (int $ts): string => (new DateTimeImmutable('@' . $ts))->setTimezone(Settings::timezone())->format('d/m H:i:s');
+  ?>
+  <p class="small">
+    <?php if ($dActive): ?><span class="dot good"></span><?= $t('admin.debug_on', ['t' => $fmtTs($dc['until']), 'm' => $dc['mmsi'] === [] ? I18n::t('admin.debug_all') : implode(', ', $dc['mmsi'])]) ?>
+    <?php else: ?><?= $t('admin.debug_off') ?><?php endif; ?>
+    · <?= $t('admin.debug_count', ['n' => number_format($dCount, 0, ',', "\u{202F}")]) ?>
+  </p>
+  <?php if (!$dActive): ?>
+  <form method="post" action="admin.php#debug"><?= $form('debug_start') ?>
+    <div class="row">
+      <div class="field"><label for="debug_mmsi"><?= $t('admin.debug_mmsi') ?></label>
+        <input id="debug_mmsi" name="debug_mmsi" maxlength="300" placeholder="226007350, 244150672">
+        <span class="help"><?= $t('admin.debug_mmsi_help') ?></span></div>
+      <div class="field"><label for="debug_hours"><?= $t('admin.debug_duration') ?></label>
+        <select id="debug_hours" name="debug_hours"><?php foreach (Debug::DURATIONS as $h): ?><option value="<?= $h ?>"><?= $h ?>&nbsp;h</option><?php endforeach; ?></select></div>
+    </div>
+    <p><button class="btn" type="submit"><?= $t('admin.debug_start') ?></button></p>
+  </form>
+  <?php else: ?>
+  <form method="post" action="admin.php#debug"><?= $form('debug_stop') ?><p><button class="btn secondary" type="submit"><?= $t('admin.debug_stop') ?></button></p></form>
+  <?php endif; ?>
+
+  <?php if ($dSummary !== []): ?>
+    <h3 class="sub"><?= $t('admin.debug_summary') ?></h3>
+    <table class="table debug-summary"><tbody>
+      <?php foreach ($dSummary as $d): ?>
+        <tr><td><b><?= Web::e($d['name'] ?? ('MMSI ' . $d['mmsi'])) ?></b><br><span class="muted small"><?= (int) $d['mmsi'] ?> · <?= $t('admin.debug_msgs', ['n' => $d['total']]) ?></span></td>
+          <td class="small"><?php foreach ($d['types'] as $ty => $n): ?><span class="chip"><?= $t('admin.debug_type', ['t' => $ty]) ?> <span class="n"><?= (int) $n ?></span></span> <?php endforeach; ?>
+            <?php if (!isset($d['types']['5']) && !isset($d['types']['24']) && !isset($d['types']['19'])): ?><br><span class="err-text"><?= $t('admin.debug_no_static') ?></span><?php endif; ?></td></tr>
+      <?php endforeach; ?>
+    </tbody></table>
+    <p class="muted small"><?= $t('admin.debug_types_help') ?></p>
+
+    <h3 class="sub"><?= $t('admin.debug_last') ?></h3>
+    <div class="debug-list">
+      <?php foreach ($dLast as $d): ?>
+        <details><summary><?= Web::e($fmtTs((int) $d['ts'])) ?> · <?= (int) $d['mmsi'] ?> · <?= $t('admin.debug_type', ['t' => (int) $d['type']]) ?></summary>
+          <pre><?= Web::e((string) (json_encode(json_decode((string) $d['raw'], true), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: $d['raw'])) ?></pre></details>
+      <?php endforeach; ?>
+    </div>
+    <p><a class="btn secondary" href="admin.php?debug_export=1"><?= $t('admin.debug_export') ?></a></p>
+    <form method="post" action="admin.php#debug"><?= $form('debug_clear') ?><p><button class="btn danger" type="submit"><?= $t('admin.debug_clear') ?></button></p></form>
+  <?php endif; ?>
 </section>
 
 <section class="card">

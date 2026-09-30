@@ -114,6 +114,10 @@ check('dest label locode', Destinations::label('FRSML', 'fr sml', $map) === 'FRS
 check('eri motor freighter is cargo', Ingest::eriToAis(8010) === 79 && Ingest::eriToAis(8250) === 79);
 check('eri tanker, passenger, unknown', Ingest::eriToAis(8021) === 89 && Ingest::eriToAis(8443) === 69 && Ingest::eriToAis(8000) === null);
 
+// Debug capture
+check('debug mmsi list', AISSeaStats\Debug::parseMmsi('226007350, 12, 244150672;226007350') === [226007350, 244150672]);
+check('debug encode drops internal keys', AISSeaStats\Debug::encode(['mmsi' => 1, '_ts' => 5]) === '{"mmsi":1}');
+
 // SMTP helpers
 check('smtp addresses', AISSeaStats\Smtp::addresses("a@x.fr; b@y.com\nnope, a@x.fr") === ['a@x.fr', 'b@y.com']);
 check('smtp header injection refused', !AISSeaStats\Smtp::validAddress("a@x.fr\r\nBcc: z@z.z"));
@@ -167,6 +171,20 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     (new Ingest($now + 60))->process([['mmsi' => 226007350, 'type' => 5, 'rxuxtime' => $now + 60, 'shipname' => 'LU MA', 'shiptype' => 70]]);
     $iv = Db::one('SELECT name, shiptype FROM vessel WHERE mmsi = 226007350');
     check('type 5 completes inland vessel', $iv['name'] === 'LU MA' && (int) $iv['shiptype'] === 70);
+    // Debug capture: only the followed MMSI is recorded, with its raw message; nothing once stopped.
+    Db::pdo()->exec('TRUNCATE TABLE debug_msg');
+    AISSeaStats\Debug::start([226007350], 1, $now);
+    (new Ingest($now + 120))->process([
+        ['mmsi' => 226007350, 'type' => 8, 'dac' => 200, 'fid' => 10, 'rxuxtime' => $now + 120, 'vin' => '01823383'],
+        ['mmsi' => 244030470, 'type' => 1, 'rxuxtime' => $now + 120, 'lat' => 51.9, 'lon' => 4.4],
+    ]);
+    $dbg = AISSeaStats\Debug::summary();
+    check('debug capture filtered', count($dbg) === 1 && $dbg[0]['mmsi'] === 226007350 && $dbg[0]['types'] === ['8 200/10' => 1]);
+    check('debug raw kept', str_contains((string) Db::value('SELECT raw FROM debug_msg'), '"vin":"01823383"'));
+    AISSeaStats\Debug::stop();
+    (new Ingest($now + 180))->process([['mmsi' => 226007350, 'type' => 5, 'rxuxtime' => $now + 180, 'shipname' => 'LU MA']]);
+    check('debug stopped', (int) Db::value('SELECT COUNT(*) FROM debug_msg') === 1);
+    Settings::set('debug_capture', null);
     // Long range: a lone far position is kept for the track but not for range records;
     // a second one shortly after, at a consistent place, counts (tropospheric ducting).
     $far = static fn (int $t, float $lat): array => ['mmsi' => 227000001, 'type' => 1, 'rxuxtime' => $t, 'lat' => $lat, 'lon' => 4.4792, 'speed' => 12];

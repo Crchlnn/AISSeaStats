@@ -19,7 +19,7 @@ sleep 1
 # shellcheck disable=SC2016 # PHP code, $t must not be expanded by the shell
 php -r 'require "src/bootstrap.php"; AISSeaStats\Db::waitReady(30); AISSeaStats\Migrator::run();
   foreach (["setting", "vessel", "stats_hourly", "stats_daily", "vessel_hourly", "vessel_daily", "msgtype_daily",
-    "position", "passage", "range_polar", "ingest_log", "zone", "vessel_photo", "photo_lookup"] as $t) {
+    "position", "passage", "range_polar", "ingest_log", "zone", "vessel_photo", "photo_lookup", "debug_msg"] as $t) {
       AISSeaStats\Db::pdo()->exec("DELETE FROM $t");
   }'
 
@@ -99,5 +99,16 @@ echo "$out" | grep -q "test message sent" || fail "alert test through webhook fa
 out=$(curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=alerts --data-urlencode "webhook_url=javascript:x" "$BASE/admin.php")
 echo "$out" | grep -q "Invalid alert setting" || fail "invalid webhook URL accepted"
 curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | grep -q 'Data (tables)' || fail "database size tile missing"
+
+# Vessel chart: 90 days means 90 daily bars, even for a new station.
+curl -s "$BASE/api.php?q=counts&period=day&days=90" | grep -o '"t":"' | wc -l | grep -qx 90 || fail "90-day chart does not have 90 bars"
+
+# Debug capture from the admin, then download.
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=debug_start -d debug_mmsi=227000101 -d debug_hours=1 "$BASE/admin.php"
+printf '{"msgs":[{"mmsi":227000101,"type":5,"shipname":"ALPHA","destination":"FRSML"}]}' |
+  curl -s -o /dev/null -u "aisseastats:${ingest}" --data-binary @- "$BASE/ingest.php"
+curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php?debug_export=1" | grep -q '"shipname":"ALPHA"' || fail "debug capture missing message"
+curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | grep -q 'Capture running until' || fail "debug capture not shown as running"
 
 echo "smoke test passed"

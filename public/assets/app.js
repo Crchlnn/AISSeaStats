@@ -557,7 +557,8 @@
         '<div class="chips vd-tags"></div></div>' +
         '<button type="button" class="icon-btn" id="vd-close" aria-label="' + esc(t('vessel.close')) + '">✕</button></div>' +
         '<div class="vd-grid"><div><div class="vd-photo">' + photo + '</div>' + credit + '</div>' +
-        '<dl class="facts">' + facts.map(function (f) { return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>'; }).join('') + '</dl></div>' +
+        '<div><dl class="facts">' + facts.map(function (f) { return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>'; }).join('') + '</dl>' +
+        (v.name ? '' : '<p class="muted small vd-noname">' + esc(t(v.vclass === 'B' ? 'vessel.no_name_b' : 'vessel.no_name')) + '</p>') + '</div></div>' +
         (v.trace && v.trace.length ? '<div class="vd-map" id="vd-map"></div>' : '<p class="muted small">' + esc(t('vessel.no_trace')) + '</p>') +
         (passages ? '<div class="vd-passages"><h3 class="sub">' + esc(t('vessel.recent')) + '</h3><ul>' + passages + '</ul></div>' : '') +
         '<div class="vd-links"><span class="muted">' + esc(t('vessel.more')) + '</span>' +

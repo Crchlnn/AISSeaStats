@@ -48,6 +48,11 @@ final class Ingest
     private array $polar = [];
     /** @var array<string, string> cache of local day per hour */
     private array $dayCache = [];
+    /** @var array<int, int>|null MMSIs whose raw messages are captured (debug), null when off */
+    private ?array $debugMmsi = null;
+    private bool $debugAll = false;
+    /** @var array<int, array{0: int, 1: int, 2: int, 3: string}> */
+    private array $debugRows = [];
 
     /** @var array{received:int, accepted:int, rejected_positions:int, vessels:int} */
     private array $stats = ['received' => 0, 'accepted' => 0, 'rejected_positions' => 0, 'unconfirmed_range' => 0, 'vessels' => 0];
@@ -62,6 +67,11 @@ final class Ingest
         $this->maxRange = (float) Settings::get('max_range_nm');
         $this->gap = max(10, (int) Settings::get('passage_gap_min')) * 60;
         $this->tz = Settings::timezone();
+        $debug = Debug::config();
+        if (Debug::active($debug, $this->now)) {
+            $this->debugMmsi = array_flip($debug['mmsi']);
+            $this->debugAll = $debug['mmsi'] === [];
+        }
     }
 
     /**
@@ -127,6 +137,10 @@ final class Ingest
                 continue;
             }
             $byMmsi[$mmsi][] = $m;
+            if ($this->debugMmsi !== null && ($this->debugAll || isset($this->debugMmsi[$mmsi]))) {
+                $type = isset($m['type']) && is_numeric($m['type']) ? max(0, min(255, (int) $m['type'])) : 0;
+                $this->debugRows[] = [(int) $m['_ts'], $mmsi, $type, Debug::encode($m)];
+            }
         }
         if ($byMmsi === []) {
             return $this->stats;
@@ -526,6 +540,8 @@ final class Ingest
 
     private function flush(): void
     {
+        self::bulk('INSERT INTO debug_msg (ts, mmsi, type, raw) VALUES %s', $this->debugRows, 100);
+        $this->debugRows = [];
         $vrows = [];
         foreach (array_keys($this->dirty) as $mmsi) {
             $v = $this->vessels[$mmsi];

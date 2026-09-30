@@ -2,6 +2,17 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.0.0-beta.7 — 2026-09-30
+
+New
+- Admin, "Debug: received messages": records the raw messages of a few vessels (or all of them for 1 hour), shows them per vessel and AIS type, and downloads them as JSON. Stops by itself; deleted after 7 days
+- Vessel card: when the name is missing, explains that it has not been received yet (identity message AIS type 5 or 24)
+
+Changes
+- Vessel chart: 30 and 90 days always show 30 and 90 bars, and 1 year 12 months, even when the station is new (empty days are no longer hidden)
+
+Database: migration 004 (debug capture table), applied automatically.
+
 ## 1.0.0-beta.6 — 2026-09-30
 
 New
