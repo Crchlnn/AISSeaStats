@@ -15,7 +15,7 @@ final class Debug
     /** Durations offered in the admin, in hours; capturing every vessel is limited to 1 hour. */
     public const DURATIONS = [1, 6, 24];
 
-    /** @return array{mmsi: array<int, int>, until: int, started: int} */
+    /** @return array{mmsi: array<int, int>, until: int, started: int, logfile: string} */
     public static function config(): array
     {
         $c = Settings::get('debug_capture');
@@ -24,6 +24,7 @@ final class Debug
             'mmsi' => array_values(array_map('intval', (array) ($c['mmsi'] ?? []))),
             'until' => (int) ($c['until'] ?? 0),
             'started' => (int) ($c['started'] ?? 0),
+            'logfile' => preg_match('/^capture_[\d_]+\.jsonl$/', (string) ($c['logfile'] ?? '')) ? (string) $c['logfile'] : '',
         ];
     }
 
@@ -52,12 +53,17 @@ final class Debug
         if ($mmsi === []) {
             $hours = 1;
         }
-        Settings::set('debug_capture', ['mmsi' => $mmsi, 'until' => $now + $hours * 3600, 'started' => $now]);
+        $logfile = DebugLog::newName($now);
+        Settings::set('debug_capture', ['mmsi' => $mmsi, 'until' => $now + $hours * 3600, 'started' => $now, 'logfile' => $logfile]);
+        DebugLog::event($logfile, 'start', ['mmsi_filter' => $mmsi, 'hours' => $hours]);
     }
 
     public static function stop(): void
     {
         $c = self::config();
+        if ($c['logfile'] !== '' && self::active($c)) {
+            DebugLog::event($c['logfile'], 'stop', ['reason' => 'manual']);
+        }
         Settings::set('debug_capture', array_merge($c, ['until' => 0]));
     }
 
@@ -66,12 +72,36 @@ final class Debug
         Db::pdo()->exec('TRUNCATE TABLE debug_msg');
     }
 
-    /** Raw message as stored: our internal keys removed, size capped. @param array<string, mixed> $m */
-    public static function encode(array $m): string
+    /**
+     * Raw message as stored: our internal keys removed, size capped. Also copied to the dated log file.
+     * $mmsi and $type are the values already decoded by the caller (fallback: the message's own keys).
+     * @param array<string, mixed> $m
+     */
+    public static function encode(array $m, ?int $mmsi = null, ?int $type = null): string
     {
+        $ts = (int) ($m['_ts'] ?? 0);
         unset($m['_ts']);
         $json = (string) json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        self::mirror($m, $json, $ts, $mmsi, $type);
         return strlen($json) > 4000 ? substr($json, 0, 4000) . '…' : $json;
+    }
+
+    /**
+     * Copy of a captured message to the dated log file (written as it arrives, untruncated).
+     * Same rules as the database capture: only while active, and only for the chosen MMSI.
+     * @param array<string, mixed> $m
+     */
+    private static function mirror(array $m, string $json, int $ts, ?int $mmsi, ?int $type): void
+    {
+        $c = self::config();
+        if ($c['logfile'] === '' || !self::active($c)) {
+            return;
+        }
+        $mmsi ??= (int) ($m['mmsi'] ?? 0);
+        if ($c['mmsi'] !== [] && !in_array($mmsi, $c['mmsi'], true)) {
+            return;
+        }
+        DebugLog::message($c['logfile'], $ts > 0 ? $ts : time(), $mmsi, $type ?? (int) ($m['type'] ?? 0), $json);
     }
 
     /** Keep the table small: a week at most, and the newest rows only. */

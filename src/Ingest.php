@@ -139,7 +139,7 @@ final class Ingest
             $byMmsi[$mmsi][] = $m;
             if ($this->debugMmsi !== null && ($this->debugAll || isset($this->debugMmsi[$mmsi]))) {
                 $type = isset($m['type']) && is_numeric($m['type']) ? max(0, min(255, (int) $m['type'])) : 0;
-                $this->debugRows[] = [(int) $m['_ts'], $mmsi, $type, Debug::encode($m)];
+                $this->debugRows[] = [(int) $m['_ts'], $mmsi, $type, Debug::encode($m, $mmsi, $type)];
             }
         }
         if ($byMmsi === []) {

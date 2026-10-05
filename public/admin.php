@@ -8,6 +8,7 @@ require __DIR__ . '/../src/bootstrap.php';
 use AISSeaStats\Alert;
 use AISSeaStats\Db;
 use AISSeaStats\Debug;
+use AISSeaStats\DebugLog;
 use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
 use AISSeaStats\Page;
@@ -76,6 +77,21 @@ if (isset($_GET['debug_export'])) {
     while (($raw = $st->fetchColumn()) !== false) {
         echo $raw, "\n";
     }
+    exit;
+}
+
+// ---------- Debug capture log files (written live to disk) ----------
+if (isset($_GET['debug_log'])) {
+    $p = DebugLog::path((string) $_GET['debug_log']);
+    if ($p === null) {
+        http_response_code(404);
+        exit('Not found');
+    }
+    header('Content-Type: application/x-ndjson; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . basename($p) . '"');
+    header('Content-Length: ' . filesize($p));
+    header('X-Content-Type-Options: nosniff');
+    readfile($p);
     exit;
 }
 
@@ -256,6 +272,11 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             case 'debug_clear':
                 Debug::clear();
                 $flash[] = ['ok', I18n::t('admin.debug_cleared')];
+                break;
+
+            case 'debug_log_delete':
+                DebugLog::delete((string) ($_POST['file'] ?? ''));
+                $flash[] = ['ok', I18n::t('admin.debuglog_deleted')];
                 break;
 
             case 'reset_data':
@@ -657,12 +678,17 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
     $dSummary = $dCount > 0 ? Debug::summary() : [];
     $dLast = $dCount > 0 ? Db::all('SELECT ts, mmsi, type, raw FROM debug_msg ORDER BY id DESC LIMIT 40') : [];
     $fmtTs = static fn (int $ts): string => (new DateTimeImmutable('@' . $ts))->setTimezone(Settings::timezone())->format('d/m H:i:s');
+    DebugLog::purge(30);
+    $dLogs = DebugLog::list();
   ?>
   <p class="small">
     <?php if ($dActive): ?><span class="dot good"></span><?= $t('admin.debug_on', ['t' => $fmtTs($dc['until']), 'm' => $dc['mmsi'] === [] ? I18n::t('admin.debug_all') : implode(', ', $dc['mmsi'])]) ?>
     <?php else: ?><?= $t('admin.debug_off') ?><?php endif; ?>
     · <?= $t('admin.debug_count', ['n' => number_format($dCount, 0, ',', "\u{202F}")]) ?>
   </p>
+  <?php if ($dActive && $dc['logfile'] !== ''): ?>
+    <p class="small muted"><?= $t('admin.debuglog_current', ['f' => $dc['logfile']]) ?></p>
+  <?php endif; ?>
   <?php if (!$dActive): ?>
   <form method="post" action="admin.php#debug"><?= $form('debug_start') ?>
     <div class="row">
@@ -698,6 +724,23 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
     </div>
     <p><a class="btn secondary" href="admin.php?debug_export=1"><?= $t('admin.debug_export') ?></a></p>
     <form method="post" action="admin.php#debug"><?= $form('debug_clear') ?><p><button class="btn danger" type="submit"><?= $t('admin.debug_clear') ?></button></p></form>
+  <?php endif; ?>
+
+  <h3 class="sub"><?= $t('admin.debuglog_title') ?></h3>
+  <p class="muted small"><?= $t('admin.debuglog_help', ['d' => DebugLog::dir()]) ?></p>
+  <?php if ($dLogs === []): ?>
+    <p class="muted small"><?= $t('admin.debuglog_none') ?></p>
+  <?php else: ?>
+    <table class="table"><tbody>
+      <?php foreach ($dLogs as $f): ?>
+        <tr><td><code><?= Web::e($f['name']) ?></code></td>
+          <td class="r"><?= number_format($f['size'] / 1024, 0, ',', ' ') ?> Ko</td>
+          <td class="r"><a class="btn secondary" href="admin.php?debug_log=<?= urlencode($f['name']) ?>"><?= $t('admin.debuglog_download') ?></a></td>
+          <td class="r"><form method="post" action="admin.php#debug" class="confirm" data-confirm="<?= $t('admin.debuglog_delete_confirm') ?>"><?= $form('debug_log_delete') ?>
+            <input type="hidden" name="file" value="<?= Web::e($f['name']) ?>">
+            <button class="btn danger" type="submit"><?= $t('admin.delete') ?></button></form></td></tr>
+      <?php endforeach; ?>
+    </tbody></table>
   <?php endif; ?>
 </section>
 
