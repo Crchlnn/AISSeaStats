@@ -72,36 +72,33 @@ final class Debug
         Db::pdo()->exec('TRUNCATE TABLE debug_msg');
     }
 
-    /**
-     * Raw message as stored: our internal keys removed, size capped. Also copied to the dated log file.
-     * $mmsi and $type are the values already decoded by the caller (fallback: the message's own keys).
-     * @param array<string, mixed> $m
-     */
-    public static function encode(array $m, ?int $mmsi = null, ?int $type = null): string
+    /** Raw message as stored: our internal keys removed, size capped. @param array<string, mixed> $m */
+    public static function encode(array $m): string
     {
-        $ts = (int) ($m['_ts'] ?? 0);
         unset($m['_ts']);
         $json = (string) json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
-        self::mirror($m, $json, $ts, $mmsi, $type);
         return strlen($json) > 4000 ? substr($json, 0, 4000) . '…' : $json;
     }
 
     /**
-     * Copy of a captured message to the dated log file (written as it arrives, untruncated).
-     * Same rules as the database capture: only while active, and only for the chosen MMSI.
+     * Copy a captured message to the dated log file, as it arrives (full message, not truncated).
+     * The caller has already applied the capture rules (active, selected MMSI); never throws.
      * @param array<string, mixed> $m
      */
-    private static function mirror(array $m, string $json, int $ts, ?int $mmsi, ?int $type): void
+    public static function mirror(array $m, int $mmsi, int $type): void
     {
-        $c = self::config();
-        if ($c['logfile'] === '' || !self::active($c)) {
-            return;
+        try {
+            $c = self::config();
+            if ($c['logfile'] === '' || !self::active($c)) {
+                return;
+            }
+            $ts = (int) ($m['_ts'] ?? 0);
+            unset($m['_ts']);
+            $json = (string) json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+            DebugLog::message($c['logfile'], $ts > 0 ? $ts : time(), $mmsi, $type, $json);
+        } catch (\Throwable) {
+            // the log file must never disturb ingestion
         }
-        $mmsi ??= (int) ($m['mmsi'] ?? 0);
-        if ($c['mmsi'] !== [] && !in_array($mmsi, $c['mmsi'], true)) {
-            return;
-        }
-        DebugLog::message($c['logfile'], $ts > 0 ? $ts : time(), $mmsi, $type ?? (int) ($m['type'] ?? 0), $json);
     }
 
     /** Keep the table small: a week at most, and the newest rows only. */
