@@ -2,6 +2,19 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.0.0-beta.8 — 2026-10-06
+
+New
+- Debug capture also writes a dated JSON Lines file (`capture_YYYYMMDD_HHMMSS.jsonl`), live and untruncated, listed in the admin with download and delete; kept 30 days. Contributed by @Phil353556 (pull request #1)
+- Vessel card: link to the vessel on aiscatcher.org (the site of the AIS-catcher community)
+
+Fixes
+- MarineTraffic link removed: MarineTraffic no longer opens a vessel from its MMSI, neither by URL nor by search (its pages use an internal id)
+- Debug capture files: Docker volume `debug-logs` mounted on `/data/debug`, writable by PHP and kept across updates, with no manual setup; tests for the log file
+
+Docs
+- README links AIS-catcher's JSON field reference
+
 ## 1.0.0-beta.7 — 2026-09-30
 
 New

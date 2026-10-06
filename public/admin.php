@@ -734,7 +734,7 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
     <table class="table"><tbody>
       <?php foreach ($dLogs as $f): ?>
         <tr><td><code><?= Web::e($f['name']) ?></code></td>
-          <td class="r"><?= number_format($f['size'] / 1024, 0, ',', ' ') ?> Ko</td>
+          <td class="r"><?= $t('unit.kb', ['n' => number_format(max(1, (int) round($f['size'] / 1024)), 0, ',', "\u{202F}")]) ?></td>
           <td class="r"><a class="btn secondary" href="admin.php?debug_log=<?= urlencode($f['name']) ?>"><?= $t('admin.debuglog_download') ?></a></td>
           <td class="r"><form method="post" action="admin.php#debug" class="confirm" data-confirm="<?= $t('admin.debuglog_delete_confirm') ?>"><?= $form('debug_log_delete') ?>
             <input type="hidden" name="file" value="<?= Web::e($f['name']) ?>">

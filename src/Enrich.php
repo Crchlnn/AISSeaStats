@@ -9,7 +9,7 @@ namespace AISSeaStats;
  *  2. Wikimedia Commons, files categorised "IMO nnnnnnn";
  *  3. Wikidata, the image (P18) of the item with that IMO number (P458) or MMSI (P587).
  * Look-ups, including "nothing found", are cached for 30 days; a network error is retried after an hour.
- * Commercial sites (MarineTraffic, VesselFinder, ShipSpotting) are only linked, never fetched:
+ * Commercial sites (VesselFinder, ShipSpotting) are only linked, never fetched:
  * their terms do not allow automated reuse of their photos.
  */
 final class Enrich

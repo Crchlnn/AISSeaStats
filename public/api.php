@@ -299,7 +299,8 @@ function vessel(int $mmsi): array
     $v['has_local_photo'] = (bool) Db::value('SELECT 1 FROM vessel_photo WHERE mmsi = ?', [$mmsi]);
     // Links only: these sites do not allow their photos to be fetched automatically.
     $v['links'] = [
-        'marinetraffic' => 'https://www.marinetraffic.com/en/ais/details/ships/mmsi:' . $mmsi,
+        // No MarineTraffic link: its vessel pages use an internal id, and neither an MMSI URL nor its search accepts an MMSI.
+        'aiscatcher' => 'https://www.aiscatcher.org/ship/details/' . $mmsi,
         'vesselfinder' => 'https://www.vesselfinder.com/vessels/details/' . ($v['imo'] ?: $mmsi),
         'shipspotting' => 'https://www.shipspotting.com/photos/gallery?' . ($v['imo'] ? 'search_imo=' . (int) $v['imo'] : 'search_mmsi=' . $mmsi),
     ];

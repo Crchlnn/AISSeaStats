@@ -4,12 +4,13 @@ declare(strict_types=1);
 namespace AISSeaStats;
 
 /**
- * Journal fichier de la capture debug, écrit au fil de l'eau.
+ * Debug capture written live to disk, for later analysis with grep or jq.
  *
- * Un fichier par session de capture : capture_YYYYMMDD_HHMMSS.jsonl (date/heure du démarrage).
- * Une ligne JSON par événement :
+ * One file per capture session: capture_YYYYMMDD_HHMMSS.jsonl (start date and time, station time zone).
+ * One JSON line per event:
  *   {"event":"start",...} / {"event":"msg","ts","iso","mmsi","type","raw":{...}} / {"event":"stop",...}
- * Ne doit jamais perturber l'ingestion : toute erreur d'écriture est absorbée (journalisée une fois).
+ * Must never disturb ingestion: any write error is swallowed (and logged once).
+ * Directory: DEBUG_LOG_DIR (Docker: a volume on /data/debug), else var/debug in the application folder.
  */
 final class DebugLog
 {
@@ -25,7 +26,7 @@ final class DebugLog
         return rtrim($dir, '/');
     }
 
-    /** Nom (unique) du fichier d'une session démarrant à $ts. */
+    /** Unique file name for a session starting at $ts. */
     public static function newName(int $ts): string
     {
         $base = 'capture_' . (new \DateTimeImmutable('@' . $ts))->setTimezone(Settings::timezone())->format('Ymd_His');
@@ -36,7 +37,7 @@ final class DebugLog
         return $name;
     }
 
-    /** Ligne "message" : $json est le message brut tel que reçu (JSON). */
+    /** "msg" line: $json is the raw message as received (JSON). */
     public static function message(string $file, int $ts, int $mmsi, int $type, string $json): void
     {
         $raw = json_decode($json, true);
@@ -50,7 +51,7 @@ final class DebugLog
         ]);
     }
 
-    /** Ligne d'événement (start / stop). @param array<string, mixed> $extra */
+    /** Event line (start / stop). @param array<string, mixed> $extra */
     public static function event(string $file, string $event, array $extra = []): void
     {
         self::write($file, ['event' => $event, 'ts' => time(), 'iso' => self::iso(time())] + $extra);
@@ -80,7 +81,7 @@ final class DebugLog
         return (new \DateTimeImmutable('@' . $ts))->setTimezone(Settings::timezone())->format('Y-m-d\TH:i:sP');
     }
 
-    /** @return list<array{name:string,size:int,mtime:int}> du plus récent au plus ancien */
+    /** @return list<array{name:string,size:int,mtime:int}> newest first */
     public static function list(): array
     {
         $out = [];
@@ -94,7 +95,7 @@ final class DebugLog
         return $out;
     }
 
-    /** Chemin sûr (anti path-traversal) ou null. */
+    /** Safe path of a log file (no path traversal), or null. */
     public static function path(string $name): ?string
     {
         $name = basename($name);
@@ -108,7 +109,7 @@ final class DebugLog
         return $p !== null && @unlink($p);
     }
 
-    /** Supprime les journaux de plus de $days jours. */
+    /** Delete logs older than $days days. */
     public static function purge(int $days = 30): void
     {
         foreach (self::list() as $f) {

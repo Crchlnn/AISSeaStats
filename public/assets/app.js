@@ -562,7 +562,7 @@
         (v.trace && v.trace.length ? '<div class="vd-map" id="vd-map"></div>' : '<p class="muted small">' + esc(t('vessel.no_trace')) + '</p>') +
         (passages ? '<div class="vd-passages"><h3 class="sub">' + esc(t('vessel.recent')) + '</h3><ul>' + passages + '</ul></div>' : '') +
         '<div class="vd-links"><span class="muted">' + esc(t('vessel.more')) + '</span>' +
-        '<a href="' + esc(v.links.marinetraffic) + '" target="_blank" rel="noopener">MarineTraffic</a>' +
+        '<a href="' + esc(v.links.aiscatcher) + '" target="_blank" rel="noopener">aiscatcher.org</a>' +
         '<a href="' + esc(v.links.vesselfinder) + '" target="_blank" rel="noopener">VesselFinder</a>' +
         '<a href="' + esc(v.links.shipspotting) + '" target="_blank" rel="noopener">' + esc(t('vessel.shipspotting')) + '</a></div>';
       body.querySelector('.vd-tags').innerHTML = tagChips(v.tags);

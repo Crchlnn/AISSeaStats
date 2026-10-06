@@ -403,10 +403,11 @@
   "admin.debug_stopped": "Capture arrêtée.",
   "admin.debug_cleared": "Messages enregistrés effacés.",
   "admin.debuglog_title": "Journaux de capture (disque)",
-  "admin.debuglog_help": "Fichiers JSON Lines datés, écrits en direct, conservés 30 jours dans {d}.",
+  "admin.debuglog_help": "Fichiers JSON Lines datés, écrits en direct pendant la capture et conservés 30 jours dans {d} (volume Docker « debug-logs », conservé lors des mises à jour). Lisibles avec grep ou jq.",
   "admin.debuglog_current": "Journal en cours : {f}",
   "admin.debuglog_none": "Aucun journal pour l'instant.",
   "admin.debuglog_download": "Télécharger",
   "admin.debuglog_deleted": "Journal supprimé.",
-  "admin.debuglog_delete_confirm": "Supprimer ce journal ?"
+  "admin.debuglog_delete_confirm": "Supprimer ce journal ?",
+  "unit.kb": "{n} Ko"
 }

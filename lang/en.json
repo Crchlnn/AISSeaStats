@@ -403,10 +403,11 @@
   "admin.debug_stopped": "Capture stopped.",
   "admin.debug_cleared": "Recorded messages deleted.",
   "admin.debuglog_title": "Capture logs (disk)",
-  "admin.debuglog_help": "Dated JSON Lines files, written live, kept 30 days in {d}.",
+  "admin.debuglog_help": "Dated JSON Lines files, written live during the capture and kept 30 days in {d} (Docker volume \"debug-logs\", kept across updates). Readable with grep or jq.",
   "admin.debuglog_current": "Current log: {f}",
   "admin.debuglog_none": "No log yet.",
   "admin.debuglog_download": "Download",
   "admin.debuglog_deleted": "Log deleted.",
-  "admin.debuglog_delete_confirm": "Delete this log?"
+  "admin.debuglog_delete_confirm": "Delete this log?",
+  "unit.kb": "{n} KB"
 }

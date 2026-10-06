@@ -173,17 +173,35 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     check('type 5 completes inland vessel', $iv['name'] === 'LU MA' && (int) $iv['shiptype'] === 70);
     // Debug capture: only the followed MMSI is recorded, with its raw message; nothing once stopped.
     Db::pdo()->exec('TRUNCATE TABLE debug_msg');
-    AISSeaStats\Debug::start([226007350], 1, $now);
-    (new Ingest($now + 120))->process([
-        ['mmsi' => 226007350, 'type' => 8, 'dac' => 200, 'fid' => 10, 'rxuxtime' => $now + 120, 'vin' => '01823383'],
-        ['mmsi' => 244030470, 'type' => 1, 'rxuxtime' => $now + 120, 'lat' => 51.9, 'lon' => 4.4],
+    $logDir = sys_get_temp_dir() . '/aisseastats-debuglog-' . getmypid();
+    putenv('DEBUG_LOG_DIR=' . $logDir);
+    $t0 = time(); // a capture is "running" against the real clock
+    AISSeaStats\Debug::start([226007350], 1, $t0);
+    (new Ingest($t0 + 120))->process([
+        ['mmsi' => 226007350, 'type' => 8, 'dac' => 200, 'fid' => 10, 'rxuxtime' => $t0 + 120, 'vin' => '01823383'],
+        ['mmsi' => 244030470, 'type' => 1, 'rxuxtime' => $t0 + 120, 'lat' => 51.9, 'lon' => 4.4],
     ]);
     $dbg = AISSeaStats\Debug::summary();
     check('debug capture filtered', count($dbg) === 1 && $dbg[0]['mmsi'] === 226007350 && $dbg[0]['types'] === ['8 200/10' => 1]);
     check('debug raw kept', str_contains((string) Db::value('SELECT raw FROM debug_msg'), '"vin":"01823383"'));
+    // The same capture is written live to a dated JSON Lines file.
+    $logs = AISSeaStats\DebugLog::list();
+    $lines = $logs ? file((string) AISSeaStats\DebugLog::path($logs[0]['name']), FILE_IGNORE_NEW_LINES) : [];
+    $msgLine = $lines ? json_decode((string) end($lines), true) : null;
+    check('debug log file written', count($logs) === 1 && preg_match('/^capture_\d{8}_\d{6}\.jsonl$/', $logs[0]['name']) === 1
+        && count($lines) === 2 && json_decode($lines[0], true)['event'] === 'start'
+        && $msgLine['event'] === 'msg' && $msgLine['mmsi'] === 226007350 && $msgLine['raw']['vin'] === '01823383');
+    check('debug log path is safe', AISSeaStats\DebugLog::path('../' . $logs[0]['name']) !== null
+        && AISSeaStats\DebugLog::path('../../etc/passwd') === null && AISSeaStats\DebugLog::path('capture_x.jsonl') === null);
     AISSeaStats\Debug::stop();
-    (new Ingest($now + 180))->process([['mmsi' => 226007350, 'type' => 5, 'rxuxtime' => $now + 180, 'shipname' => 'LU MA']]);
+    (new Ingest($t0 + 180))->process([['mmsi' => 226007350, 'type' => 5, 'rxuxtime' => $t0 + 180, 'shipname' => 'LU MA']]);
     check('debug stopped', (int) Db::value('SELECT COUNT(*) FROM debug_msg') === 1);
+    $lines = file((string) AISSeaStats\DebugLog::path($logs[0]['name']), FILE_IGNORE_NEW_LINES);
+    check('debug log closed', count($lines) === 3 && json_decode((string) end($lines), true)['event'] === 'stop');
+    AISSeaStats\DebugLog::delete($logs[0]['name']);
+    check('debug log deleted', AISSeaStats\DebugLog::list() === []);
+    @rmdir($logDir);
+    putenv('DEBUG_LOG_DIR');
     Settings::set('debug_capture', null);
     // Long range: a lone far position is kept for the track but not for range records;
     // a second one shortly after, at a consistent place, counts (tropospheric ducting).

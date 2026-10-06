@@ -109,6 +109,12 @@ curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d actio
 printf '{"msgs":[{"mmsi":227000101,"type":5,"shipname":"ALPHA","destination":"FRSML"}]}' |
   curl -s -o /dev/null -u "aisseastats:${ingest}" --data-binary @- "$BASE/ingest.php"
 curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php?debug_export=1" | grep -q '"shipname":"ALPHA"' || fail "debug capture missing message"
-curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | grep -q 'Capture running until' || fail "debug capture not shown as running"
+admin=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php")
+echo "$admin" | grep -q 'Capture running until' || fail "debug capture not shown as running"
+log=$(echo "$admin" | grep -o 'debug_log=capture_[0-9_]*\.jsonl' | head -1 | cut -d= -f2)
+[ -n "$log" ] || fail "debug capture file not listed"
+curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php?debug_log=$log" | grep -q '"shipname":"ALPHA"' || fail "debug capture file missing message"
+code=$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" -b "$JAR" "$BASE/admin.php?debug_log=..%2F..%2Fsrc%2Fbootstrap.php")
+[ "$code" = "404" ] || fail "debug log download accepts a path ($code)"
 
 echo "smoke test passed"

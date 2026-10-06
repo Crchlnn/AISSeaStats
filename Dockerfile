@@ -18,6 +18,9 @@ COPY src ./src
 COPY docker ./docker
 COPY LICENSE README.md ./
 
+# Debug capture files: written by PHP-FPM (www-data); a new named volume copies this ownership.
+RUN mkdir -p /data/debug && chown www-data:www-data /data/debug
+
 RUN chmod 755 /app/docker/entrypoint.sh \
  && lighttpd -tt -f /app/docker/lighttpd.conf
 

@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 namespace AISSeaStats;
 
-const VERSION = '1.0.0-beta.7';
+const VERSION = '1.0.0-beta.8';
 const APP_ROOT = __DIR__ . '/..';
 
 spl_autoload_register(static function (string $class): void {

@@ -2,6 +2,19 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.0.0-beta.8 — 06/10/2026
+
+Nouveautés
+- La capture de débogage écrit aussi un fichier JSON Lines daté (`capture_AAAAMMJJ_HHMMSS.jsonl`), en direct et sans troncature, listé dans l'admin avec téléchargement et suppression ; conservé 30 jours. Contribution de @Phil353556 (pull request #1)
+- Fiche navire : lien vers le navire sur aiscatcher.org (le site de la communauté AIS-catcher)
+
+Corrections
+- Lien MarineTraffic retiré : MarineTraffic n'ouvre plus un navire à partir de son MMSI, ni par adresse ni par recherche (ses pages utilisent un identifiant interne)
+- Fichiers de capture : volume Docker `debug-logs` monté sur `/data/debug`, accessible en écriture par PHP et conservé lors des mises à jour, sans réglage manuel ; tests du fichier de capture
+
+Documentation
+- Le README renvoie à la référence des champs JSON d'AIS-catcher
+
 ## 1.0.0-beta.7 — 30/09/2026
 
 Nouveautés

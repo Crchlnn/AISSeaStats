@@ -9,7 +9,7 @@ AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it
 - **Top vessels** by passages, days seen, length, speed and distance
 - **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
 - **Fleet** by type and flag, and **range by direction**
-- A **vessel card** on click: photo (your own, or Wikimedia Commons), identity, size, first and last seen, recent passages, track, links to MarineTraffic, VesselFinder and ShipSpotting
+- A **vessel card** on click: photo (your own, or Wikimedia Commons), identity, size, first and last seen, recent passages, track, links to aiscatcher.org, VesselFinder and ShipSpotting
 - **Alerts** when your station stops receiving: ntfy, Telegram, webhook or e-mail
 
 French and English, light and dark themes, works on a phone. Runs next to AIS-catcher on a Raspberry Pi.
@@ -109,7 +109,7 @@ Add these options to your existing AIS-catcher command (do not run the line on i
 -M DTM -H http://<pi-address>:8095/ingest.php interval 15 gzip on userpwd aisseastats:<token> id MyStation
 ```
 
-`-M DTM` adds signal level, reception time and flag country to each message. Without it, the flag is derived from the MMSI and signal levels are not recorded.
+`-M DTM` adds signal level, reception time and flag country to each message. Field reference: [AIS-catcher JSON decoding](https://jvde-github.github.io/AIS-catcher-docs/references/JSON-decoding/). Without it, the flag is derived from the MMSI and signal levels are not recorded.
 
 ### Which address?
 
@@ -152,6 +152,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.0.0-beta.8 | 2026-10-06 | Debug capture also written to a dated JSON Lines file (contributed by @Phil353556); aiscatcher.org link on the vessel card instead of MarineTraffic, whose links no longer work |
 | 1.0.0-beta.7 | 2026-09-30 | Debug capture of raw messages in the admin; explanation when a vessel's name has not been received; 30/90-day charts always show the whole period |
 | 1.0.0-beta.6 | 2026-09-30 | Alerts when reception stops, and when it comes back: ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) and e-mail, with a test button; optional heartbeat URL to detect a station that is off; type of inland vessels from Inland AIS data; clearer database size in the admin |
 | 1.0.0-beta.5 | 2026-09-30 | Destination dictionary in the admin (e.g. `SAINT-MALO, ST-MALO, FR SML` → `FRSML`); meaningless destinations (`0`, `Q`…) shown as *Unknown*; click a bar of the vessel chart to list its vessels; maximum range raised to 1,500 NM by default (tropospheric ducting), with far positions confirmed before they set a record |
@@ -206,7 +207,7 @@ The vessel card shows, in this order:
 2. a free photo from [Wikimedia Commons](https://commons.wikimedia.org/), found by IMO number (files categorised `IMO nnnnnnn`);
 3. the image of the matching [Wikidata](https://www.wikidata.org/) item, found by IMO number (P458) or MMSI (P587).
 
-Free photos are shown with author and licence and cached 30 days. Many fishing boats and pleasure craft have no free photo anywhere: they get a silhouette, and you can add yours. MarineTraffic, VesselFinder and ShipSpotting are **linked, never fetched**: their terms do not allow automated reuse of their photos. The Wikimedia/Wikidata look-up is the only outbound call and can be turned off in the admin.
+Free photos are shown with author and licence and cached 30 days. Many fishing boats and pleasure craft have no free photo anywhere: they get a silhouette, and you can add yours. VesselFinder, ShipSpotting and aiscatcher.org are **linked, never fetched**: their terms do not allow automated reuse of their photos. The Wikimedia/Wikidata look-up is the only outbound call and can be turned off in the admin.
 
 ## Troubleshooting
 

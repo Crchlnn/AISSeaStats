@@ -43,8 +43,12 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       TZ: ${TZ:-Europe/Paris}
       INGEST_ALLOW: ${INGEST_ALLOW:-}
+      DEBUG_LOG_DIR: /data/debug
     ports:
       - "${AISSEASTATS_PORT:-8095}:8080"
+    volumes:
+      # Debug capture files (admin page), kept across updates
+      - debug-logs:/data/debug
 
   worker:
     build: .
@@ -60,3 +64,4 @@ services:
 
 volumes:
   db-data:
+  debug-logs:
