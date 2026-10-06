@@ -3,3 +3,4 @@
 *.log
 /vendor/
 /node_modules/
+var/

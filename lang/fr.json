@@ -401,5 +401,12 @@
   "admin.debug_bad_mmsi": "MMSI invalide : 9 chiffres, séparés par des virgules.",
   "admin.debug_started": "Capture démarrée.",
   "admin.debug_stopped": "Capture arrêtée.",
-  "admin.debug_cleared": "Messages enregistrés effacés."
+  "admin.debug_cleared": "Messages enregistrés effacés.",
+  "admin.debuglog_title": "Journaux de capture (disque)",
+  "admin.debuglog_help": "Fichiers JSON Lines datés, écrits en direct, conservés 30 jours dans {d}.",
+  "admin.debuglog_current": "Journal en cours : {f}",
+  "admin.debuglog_none": "Aucun journal pour l'instant.",
+  "admin.debuglog_download": "Télécharger",
+  "admin.debuglog_deleted": "Journal supprimé.",
+  "admin.debuglog_delete_confirm": "Supprimer ce journal ?"
 }

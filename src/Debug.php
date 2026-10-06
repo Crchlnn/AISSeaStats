@@ -15,7 +15,7 @@ final class Debug
     /** Durations offered in the admin, in hours; capturing every vessel is limited to 1 hour. */
     public const DURATIONS = [1, 6, 24];
 
-    /** @return array{mmsi: array<int, int>, until: int, started: int} */
+    /** @return array{mmsi: array<int, int>, until: int, started: int, logfile: string} */
     public static function config(): array
     {
         $c = Settings::get('debug_capture');
@@ -24,6 +24,7 @@ final class Debug
             'mmsi' => array_values(array_map('intval', (array) ($c['mmsi'] ?? []))),
             'until' => (int) ($c['until'] ?? 0),
             'started' => (int) ($c['started'] ?? 0),
+            'logfile' => preg_match('/^capture_[\d_]+\.jsonl$/', (string) ($c['logfile'] ?? '')) ? (string) $c['logfile'] : '',
         ];
     }
 
@@ -52,12 +53,17 @@ final class Debug
         if ($mmsi === []) {
             $hours = 1;
         }
-        Settings::set('debug_capture', ['mmsi' => $mmsi, 'until' => $now + $hours * 3600, 'started' => $now]);
+        $logfile = DebugLog::newName($now);
+        Settings::set('debug_capture', ['mmsi' => $mmsi, 'until' => $now + $hours * 3600, 'started' => $now, 'logfile' => $logfile]);
+        DebugLog::event($logfile, 'start', ['mmsi_filter' => $mmsi, 'hours' => $hours]);
     }
 
     public static function stop(): void
     {
         $c = self::config();
+        if ($c['logfile'] !== '' && self::active($c)) {
+            DebugLog::event($c['logfile'], 'stop', ['reason' => 'manual']);
+        }
         Settings::set('debug_capture', array_merge($c, ['until' => 0]));
     }
 
@@ -72,6 +78,27 @@ final class Debug
         unset($m['_ts']);
         $json = (string) json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
         return strlen($json) > 4000 ? substr($json, 0, 4000) . '…' : $json;
+    }
+
+    /**
+     * Copy a captured message to the dated log file, as it arrives (full message, not truncated).
+     * The caller has already applied the capture rules (active, selected MMSI); never throws.
+     * @param array<string, mixed> $m
+     */
+    public static function mirror(array $m, int $mmsi, int $type): void
+    {
+        try {
+            $c = self::config();
+            if ($c['logfile'] === '' || !self::active($c)) {
+                return;
+            }
+            $ts = (int) ($m['_ts'] ?? 0);
+            unset($m['_ts']);
+            $json = (string) json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+            DebugLog::message($c['logfile'], $ts > 0 ? $ts : time(), $mmsi, $type, $json);
+        } catch (\Throwable) {
+            // the log file must never disturb ingestion
+        }
     }
 
     /** Keep the table small: a week at most, and the newest rows only. */

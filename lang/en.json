@@ -401,5 +401,12 @@
   "admin.debug_bad_mmsi": "Invalid MMSI: 9 digits, separated by commas.",
   "admin.debug_started": "Capture started.",
   "admin.debug_stopped": "Capture stopped.",
-  "admin.debug_cleared": "Recorded messages deleted."
+  "admin.debug_cleared": "Recorded messages deleted.",
+  "admin.debuglog_title": "Capture logs (disk)",
+  "admin.debuglog_help": "Dated JSON Lines files, written live, kept 30 days in {d}.",
+  "admin.debuglog_current": "Current log: {f}",
+  "admin.debuglog_none": "No log yet.",
+  "admin.debuglog_download": "Download",
+  "admin.debuglog_deleted": "Log deleted.",
+  "admin.debuglog_delete_confirm": "Delete this log?"
 }
