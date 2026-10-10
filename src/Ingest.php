@@ -397,7 +397,7 @@ final class Ingest
             $sector = (int) floor($brg / 10) % 36;
             $key = $day . '|' . $sector;
             if (!isset($this->polar[$key]) || $dist > $this->polar[$key]['dist']) {
-                $this->polar[$key] = ['dist' => $dist, 'mmsi' => $mmsi];
+                $this->polar[$key] = ['dist' => $dist, 'mmsi' => $mmsi, 'ts' => $ts];
             }
         }
 
@@ -623,11 +623,13 @@ final class Ingest
         $rows = [];
         foreach ($this->polar as $key => $p) {
             [$day, $sector] = explode('|', $key);
-            $rows[] = [$day, (int) $sector, $p['dist'], $p['mmsi']];
+            $rows[] = [$day, (int) $sector, $p['dist'], $p['mmsi'], $p['ts']];
         }
+        // mmsi and ts are compared with the stored record before max_dist_nm is raised (assignments run in order).
         self::bulk(
-            'INSERT INTO range_polar (day, sector, max_dist_nm, mmsi) VALUES %s ON DUPLICATE KEY UPDATE
+            'INSERT INTO range_polar (day, sector, max_dist_nm, mmsi, ts) VALUES %s ON DUPLICATE KEY UPDATE
              mmsi = IF(VALUES(max_dist_nm) > max_dist_nm, VALUES(mmsi), mmsi),
+             ts = IF(VALUES(max_dist_nm) > max_dist_nm, VALUES(ts), ts),
              max_dist_nm = GREATEST(max_dist_nm, VALUES(max_dist_nm))',
             $rows
         );

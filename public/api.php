@@ -65,7 +65,7 @@ try {
         case 'fleet':
             Web::json(fleet($sinceDay, $sinceTs), 200, 60);
         case 'polar':
-            Web::json(polar($sinceDay), 200, 60);
+            Web::json(polar($sinceDay, $tz), 200, 60);
         case 'regulars':
             // At most a year: regular patterns older than that say little about today's traffic.
             Web::json(['rows' => Stats::regulars(max($sinceTs, $today->modify('-365 days')->getTimestamp()))], 200, 300);
@@ -262,7 +262,7 @@ function fleet(DateTimeImmutable $sinceDay, int $sinceTs): array
 }
 
 /** @return array<string, mixed> */
-function polar(DateTimeImmutable $sinceDay): array
+function polar(DateTimeImmutable $sinceDay, DateTimeZone $tz): array
 {
     $period = array_fill(0, 36, 0.0);
     foreach (Db::all('SELECT sector, MAX(max_dist_nm) m FROM range_polar WHERE day >= ? GROUP BY sector', [$sinceDay->format('Y-m-d')]) as $r) {
@@ -272,7 +272,14 @@ function polar(DateTimeImmutable $sinceDay): array
     foreach (Db::all('SELECT sector, MAX(max_dist_nm) m FROM range_polar GROUP BY sector') as $r) {
         $all[(int) $r['sector']] = (float) $r['m'];
     }
-    return ['period' => $period, 'all' => $all, 'furthest' => Stats::furthest($sinceDay->format('Y-m-d'))];
+    return [
+        'period' => $period,
+        'all' => $all,
+        // Who set each sector's record and when, for the chart tooltip.
+        'period_rec' => Stats::sectorRecords($sinceDay->format('Y-m-d'), $tz),
+        'all_rec' => Stats::sectorRecords(null, $tz),
+        'furthest' => Stats::furthest($sinceDay->format('Y-m-d'), $tz),
+    ];
 }
 
 /** @return array<string, mixed> */
@@ -355,6 +362,7 @@ function search(string $s): array
 function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): array
 {
     $cols = 'v.mmsi, v.name, v.shiptype, v.vclass, v.country, v.length_m, v.tags, v.last_seen';
+    $bands = null; // set for a bar of the vessel chart
     switch ($by) {
         case 'type':
             $cat = (string) ($_GET['value'] ?? '');
@@ -397,8 +405,9 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
             if ($h <= 0 || $h % 3600 !== 0) {
                 Web::json(['error' => 'bad hour'], 400);
             }
-            $rows = Db::all("SELECT {$cols} FROM vessel_hourly h JOIN vessel v ON v.mmsi = h.mmsi
+            $rows = Db::all("SELECT {$cols}, h.max_dist_nm AS dist FROM vessel_hourly h JOIN vessel v ON v.mmsi = h.mmsi
                 WHERE h.hour_ts = ? ORDER BY v.name IS NULL, v.name, v.mmsi LIMIT 300", [$h]);
+            $bands = Db::all('SELECT ' . Stats::bandSql('max_dist_nm') . ' AS b, COUNT(*) AS n FROM vessel_hourly WHERE hour_ts = ? GROUP BY b', [$h]);
             break;
         case 'day':
         case 'month':
@@ -409,11 +418,29 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
             }
             $first = $by === 'day' ? $value : $value . '-01';
             $last = $by === 'day' ? $value : date('Y-m-t', (int) strtotime($first . ' 00:00:00 UTC'));
-            $rows = Db::all("SELECT {$cols}, SUM(d.msgs) AS msgs FROM vessel_daily d JOIN vessel v ON v.mmsi = d.mmsi
+            $rows = Db::all("SELECT {$cols}, SUM(d.msgs) AS msgs, MAX(d.max_dist_nm) AS dist FROM vessel_daily d JOIN vessel v ON v.mmsi = d.mmsi
                 WHERE d.day BETWEEN ? AND ? GROUP BY d.mmsi ORDER BY msgs DESC, v.mmsi LIMIT 300", [$first, $last]);
+            $bands = Db::all('SELECT ' . Stats::bandSql('d') . ' AS b, COUNT(*) AS n FROM (
+                SELECT mmsi, MAX(max_dist_nm) AS d FROM vessel_daily WHERE day BETWEEN ? AND ? GROUP BY mmsi) x GROUP BY b', [$first, $last]);
             break;
         default:
             Web::json(['error' => 'unknown list'], 400);
     }
-    return ['by' => $by, 'rows' => $rows, 'truncated' => count($rows) >= 300];
+    $out = ['by' => $by, 'rows' => $rows, 'truncated' => count($rows) >= 300];
+    if ($bands !== null) {
+        // A bar of the vessel chart: each vessel's distance band (its furthest position in that hour, day or month)
+        // and the totals per band for the whole bar, even when the list is cut at 300.
+        $totals = [0, 0, 0, 0];
+        foreach ($bands as $b) {
+            $totals[(int) $b['b']] = (int) $b['n'];
+        }
+        foreach ($out['rows'] as &$r) {
+            $r['dist'] = $r['dist'] !== null ? (float) $r['dist'] : null;
+            $r['band'] = Stats::band($r['dist']);
+        }
+        unset($r);
+        $out['bands'] = $totals;
+        $out['limits'] = Stats::BAND_LIMITS;
+    }
+    return $out;
 }

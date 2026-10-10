@@ -125,4 +125,9 @@ for q in "counts&period=hour&days=2:bands" "counts&period=day&days=30:events" "c
 done
 curl -s "$BASE/" | grep -q 'id="regulars-table"' || fail "regulars card missing"
 
+# 1.1.1: range records carry their vessel and time; a bar's vessel list carries each vessel's distance band.
+curl -s "$BASE/api.php?q=polar&days=30" | grep -q '"all_rec":\[.*"mmsi":244030470.*"ts":[0-9]' || fail "range record without vessel or time"
+curl -s "$BASE/api.php?q=list&by=day&value=${day}" | grep -q '"band":[0-3].*"bands":\[' || fail "day list without distance bands"
+curl -s "$BASE/api.php?q=list&by=flag&value=FR&days=30" | grep -q '"bands":' && fail "flag list has distance bands"
+
 echo "smoke test passed"

@@ -4,12 +4,12 @@ Long-term statistics for your [AIS-catcher](https://github.com/jvde-github/AIS-c
 
 AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it into one simple page:
 
-- **Vessels seen** per hour, day and month, split by distance (under 20 NM, 20–50 NM, beyond); click a bar to list them
+- **Vessels seen** per hour, day and month, split by distance (under 20 NM, 20–50 NM, beyond); click a bar to list them, each with its distance band
 - **Propagation days** flagged when the station hears much further than usual (tropospheric ducting), and the **furthest vessels**
 - **Top routes**, inferred from where each vessel enters and leaves your coverage, drawn on a map
 - **Top vessels** by passages, days seen, length, speed and distance
 - **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
-- **Fleet** by type and flag, and **range by direction**
+- **Fleet** by type and flag, and **range by direction**, with the vessel and time of each record
 - **Regulars**: vessels that come back most regularly, and the time between passages on each vessel card
 - **Busiest hours**: average traffic by weekday and hour
 - **Station reception**: hour-by-hour strip, share of hours with messages and interruptions
@@ -25,6 +25,13 @@ French and English, light and dark themes, works on a phone. Runs next to AIS-ca
 <p>
   <img src="docs/screenshots/vessel-card.png" alt="Vessel card with identity, track on the map and recent passages" width="49%">
   <img src="docs/screenshots/fleet-range.png" alt="Top vessels, fleet by type and flag, range by direction" width="49%">
+</p>
+
+![Regulars, busiest hours by weekday and hour, and station reception hour by hour (dark theme)](docs/screenshots/new-stats.png)
+
+<p>
+  <img src="docs/screenshots/distance-bands.png" alt="Vessels seen per day, split by distance band, on a phone (French interface)" width="49%">
+  <img src="docs/screenshots/range-furthest.png" alt="Range by direction and furthest vessels with day and direction, on a phone (French interface)" width="40%">
 </p>
 
 ## How it works
@@ -156,6 +163,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.1.1 | 2026-10-10 | Vessel list of a chart bar: a coloured square for each vessel's distance band, its distance and the totals per band; range chart tooltip: vessel, date and time of each record; time of the record in the furthest vessels list |
 | 1.1.0 | 2026-10-10 | Vessel chart split by distance band; exceptional propagation days and furthest vessels; Regulars and time between passages; busiest hours (weekday × hour); station reception strip |
 | 1.0.0-beta.8 | 2026-10-06 | Debug capture also written to a dated JSON Lines file (contributed by @Phil353556); aiscatcher.org link on the vessel card instead of MarineTraffic, whose links no longer work |
 | 1.0.0-beta.7 | 2026-09-30 | Debug capture of raw messages in the admin; explanation when a vessel's name has not been received; 30/90-day charts always show the whole period |
@@ -182,6 +190,8 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 ## Reading the statistics
 
 - **Distance bands.** Each vessel is counted once per hour, day or month, in the band of its furthest position: under 20 NM, 20–50 NM, 50 NM and beyond, or *distance unknown* (no position received, or hours recorded before 1.1.0).
+- **Vessel list of a bar.** Clicking a bar lists its vessels with a coloured square for their band (same colours as the chart) and their furthest distance; the totals per band at the top count the whole bar, even when the list stops at 300 vessels.
+- **Range records.** Hovering the range chart shows, for each 10° sector, the vessel that set the record and when. Records set before 1.1.1 get their time from the sampled positions when these are still kept (30 days); older ones show their day only.
 - **Exceptional propagation.** A day is flagged (orange triangle above the bar) when its range is at least twice the usual range (median of the 30 previous days), at least 20 NM more, and at least 3 vessels were heard beyond 1.5 × the usual range. Beyond the horizon, VHF reception depends on tropospheric ducting, which follows the weather: see the forecast on [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html).
 - **Regulars.** Time between passages is measured from the end of one passage to the start of the next (a passage ends after 2 hours without hearing the vessel). Vessels with at least 4 passages in the period are ranked by how steady that time is. A vessel moored at the edge of coverage, heard on and off, can count several short passages.
 - **Busiest hours.** Average number of vessels per hour, by weekday and hour in the station's time zone, over the period (at least 7 days). Hours without any message are left out, so an outage does not look like calm.

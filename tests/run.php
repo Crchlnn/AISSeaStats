@@ -335,7 +335,25 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
         [['2024-02-21', 31, 100, 900000003], ['2024-02-21', 4, 70, 900000002], ['2024-02-20', 31, 20, 900000003]]);
     $far = Stats::furthest('2024-02-01');
     check('furthest vessels', count($far) === 3 && $far[0]['mmsi'] === 900000003 && $far[0]['dist'] === 100.0
-        && $far[0]['day'] === '2024-02-21' && $far[0]['dir'] === 'NW');
+        && $far[0]['day'] === '2024-02-21' && $far[0]['dir'] === 'NW' && $far[0]['ts'] === null);
+    // 1.1.1: who set each sector's record and when; a time off the record's day (approximate backfill) is not shown.
+    $rt = (int) (new DateTimeImmutable('2024-02-21 10:15', $utc))->getTimestamp();
+    Db::run("UPDATE range_polar SET ts = ? WHERE day = '2024-02-21' AND sector = 31", [$rt]);
+    Db::run("UPDATE range_polar SET ts = ? WHERE day = '2024-02-21' AND sector = 4", [$rt + 86400]);
+    $recs = Stats::sectorRecords('2024-02-01', $utc);
+    check('sector records', count($recs) === 36 && $recs[31]['mmsi'] === 900000003 && $recs[31]['day'] === '2024-02-21'
+        && $recs[31]['ts'] === $rt && $recs[4]['mmsi'] === 900000002 && $recs[4]['ts'] === null && $recs[5] === null);
+    check('sector records since a day', Stats::sectorRecords('2024-02-22', $utc)[31] === null);
+    check('furthest vessel time', Stats::furthest('2024-02-01', $utc)[0]['ts'] === $rt);
+    $late = (int) (new DateTimeImmutable('2024-02-20 23:30', $utc))->getTimestamp(); // 21 Feb 00:30 in Paris
+    check('record time on its day', Stats::timeOnDay($late, '2024-02-21', new DateTimeZone('Europe/Paris')) === $late
+        && Stats::timeOnDay($late, '2024-02-21', $utc) === null && Stats::timeOnDay(null, '2024-02-21', $utc) === null);
+    // Ingestion keeps the time of the furthest position of the day and sector, across batches.
+    foreach ([[100, 52.05], [1000, 52.08], [2000, 52.06]] as [$dt, $la]) {
+        (new Ingest($h0 + $dt))->process([['mmsi' => 900000020, 'type' => 1, 'rxuxtime' => $h0 + $dt, 'lat' => $la, 'lon' => 4.4792]]);
+    }
+    $rec0 = Db::one('SELECT mmsi, ts FROM range_polar WHERE sector = 0 ORDER BY max_dist_nm DESC LIMIT 1');
+    check('record time from ingestion', $rec0 !== null && (int) $rec0['mmsi'] === 900000020 && (int) $rec0['ts'] === $h0 + 1000);
     // Time between passages: A every 10 h (1 h long, so 9 h away), B irregular, C only 3 passages.
     Ingest::bulk('INSERT IGNORE INTO vessel (mmsi, name, vclass, first_seen, last_seen) VALUES %s',
         [[900000011, 'REGULAR', 'A', 1, 1], [900000012, 'IRREGULAR', 'A', 1, 1], [900000013, 'RARE', 'A', 1, 1]]);

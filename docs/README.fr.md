@@ -1,12 +1,19 @@
 # AISSeaStats — guide rapide
 
-Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic. Depuis la 1.1.0 : navires vus par tranche de distance, jours de propagation exceptionnelle et navires les plus lointains, habitués (temps entre deux passages), heures d'affluence et réception de la station heure par heure.
+Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic. Depuis la 1.1.0 : navires vus par tranche de distance, jours de propagation exceptionnelle et navires les plus lointains, habitués (temps entre deux passages), heures d'affluence et réception de la station heure par heure. En 1.1.1 : tranche de distance de chaque navire dans la liste d'une barre, navire, date et heure de chaque record de portée.
 
 ![Page de statistiques : chiffres clés, navires vus par heure, top routes et destinations déclarées](screenshots/overview.png)
 
 <p>
   <img src="screenshots/vessel-card.png" alt="Fiche navire : identité, trace sur la carte, passages récents" width="49%">
   <img src="screenshots/fleet-range.png" alt="Top navires, flotte par type et pavillon, portée par direction" width="49%">
+</p>
+
+![Habitués, heures d'affluence par jour et heure, réception de la station heure par heure (thème sombre, interface anglaise)](screenshots/new-stats.png)
+
+<p>
+  <img src="screenshots/distance-bands.png" alt="Navires vus par jour, par tranche de distance, sur téléphone" width="49%">
+  <img src="screenshots/range-furthest.png" alt="Portée par direction et navires les plus lointains avec jour et direction, sur téléphone" width="40%">
 </p>
 
 ## Prérequis
@@ -115,6 +122,7 @@ La plus récente en premier. Détail, corrections et évolutions de la base pour
 
 | Version | Date | Nouveautés |
 |---|---|---|
+| 1.1.1 | 10/10/2026 | Liste des navires d'une barre du graphique : carré de couleur de la tranche de distance de chaque navire, sa distance et les totaux par tranche ; infobulle du graphique de portée : navire, date et heure de chaque record ; heure du record dans les navires les plus lointains |
 | 1.1.0 | 10/10/2026 | Graphique des navires par tranche de distance ; jours de propagation exceptionnelle et navires les plus lointains ; habitués et temps entre deux passages ; heures d'affluence (jour × heure) ; réception de la station heure par heure |
 | 1.0.0-beta.8 | 06/10/2026 | Capture de débogage aussi écrite dans un fichier JSON Lines daté (contribution de @Phil353556) ; lien aiscatcher.org sur la fiche navire à la place de MarineTraffic, dont les liens ne fonctionnent plus |
 | 1.0.0-beta.7 | 30/09/2026 | Capture de débogage des messages bruts dans l'admin ; explication quand le nom d'un navire n'a pas été reçu ; graphiques 30/90 jours sur toute la période |
@@ -154,6 +162,7 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 - **Photos** : dans l'ordre, votre propre photo (admin → Photos de navires, ou lien « Ajouter une photo » sur la fiche quand vous êtes connecté), puis une photo libre de Wikimedia Commons ou Wikidata (par IMO ou MMSI). Beaucoup de bateaux de pêche et de plaisance n'ont aucune photo libre : ajoutez la vôtre. VesselFinder, ShipSpotting et aiscatcher.org sont proposés en liens : leurs conditions n'autorisent pas la récupération automatique de leurs photos.
 - **Alertes** (page admin) : AIS-catcher ne prévient pas quand la réception s'arrête ; AISSeaStats envoie un message après N minutes sans rien recevoir (30 par défaut), puis un autre quand la réception revient. Canaux, au choix et cumulables : **ntfy** (application sur téléphone, serveur public ntfy.sh ou le vôtre, avec un nom de sujet difficile à deviner), **Telegram** (bot créé avec @BotFather), **webhook** (JSON lisible par Discord, Slack, Gotify, Home Assistant…) et **e-mail** (serveur SMTP de votre messagerie). Le bouton « Envoyer un test » vérifie chaque canal. Ces alertes partent du Pi : s'il est éteint ou sans réseau, seule une URL **heartbeat** (healthchecks.io, Uptime Kuma en mode Push…) permet d'être prévenu.
 - **Lire les statistiques (1.1.0)** : chaque navire compte une fois par heure, jour ou mois, dans la tranche de sa position la plus lointaine (moins de 20 NM, 20 à 50 NM, au-delà, ou distance inconnue). Un jour est signalé en **propagation exceptionnelle** (triangle orange) quand sa portée vaut au moins deux fois la portée habituelle (médiane des 30 jours précédents), avec 20 NM de plus et au moins 3 navires entendus au-delà de 1,5 fois cette portée ; prévisions sur [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html). Les **habitués** sont classés selon la régularité du temps entre deux passages (de la fin de l'un au début du suivant, 4 passages au moins). Les **heures d'affluence** ne comptent que les heures avec des messages. Dans la **réception de la station**, une case rouge signifie « aucun message » : panne, ou simplement pas de trafic sur une zone calme.
+- **Liste d'une barre et records (1.1.1)** : un clic sur une barre liste ses navires avec un carré de la couleur de leur tranche et leur distance maximale ; les totaux par tranche, en haut, comptent toute la barre même si la liste s'arrête à 300 navires. Au survol du graphique de portée, chaque secteur de 10° indique le navire du record, sa date et son heure. Les records antérieurs à la 1.1.1 retrouvent leur heure grâce aux positions encore conservées (30 jours) ; les plus anciens n'affichent que leur jour.
 - **Navire sans nom** : le nom n'arrive que dans le message d'identité (AIS type 5, ou 24 en classe B), envoyé toutes les 6 minutes et plus long qu'une position, donc le premier perdu en limite de portée. Dans l'admin, **Débogage : messages reçus** enregistre ce qu'AIS-catcher envoie pour ce MMSI et montre quels types de messages arrivent.
 - **Taille de la base** : l'admin affiche la taille des statistiques (quelques Mo). Le dossier de MariaDB dépasse 100 Mo dès l'installation, car il contient des fichiers de taille fixe, surtout le journal de transactions de 96 Mo. C'est normal, seules les données grandissent.
 - **Carte « Access blocked »** ou **graphique vide après changement de période** : corrigés en 1.0.0-beta.4, mettez à jour puis rechargez la page.

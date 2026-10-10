@@ -2,6 +2,15 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.1 — 10/10/2026
+
+Améliorations
+- Liste des navires d'une barre du graphique (heure, jour ou mois) : un carré de couleur indique la tranche de distance de chaque navire, aux couleurs du graphique, avec sa distance maximale ; les totaux par tranche de toute la barre s'affichent en haut
+- Portée par direction : l'infobulle nomme le navire qui détient le record de chaque secteur, avec sa date et son heure (pour la période et le record absolu)
+- Navires les plus lointains : heure du record à côté de son jour
+
+Base de données : migration 006 (heure de chaque record de portée ; les records des 30 derniers jours retrouvent leur heure à partir des positions échantillonnées quand l'une correspond), appliquée automatiquement.
+
 ## 1.1.0 — 10/10/2026
 
 Nouvelles statistiques

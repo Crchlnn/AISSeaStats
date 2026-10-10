@@ -215,6 +215,20 @@
   }
 
   // ---------- Vessel counts ----------
+  // Distance bands of the vessel chart (also the squares of a bar's vessel list; colours match .band-0 to .band-3 in app.css).
+  function bandDefs(lim) {
+    lim = lim || [20, 50];
+    return [
+      { label: '< ' + lim[0] + NB + 'NM', color: css('--series-1') },
+      { label: lim[0] + '–' + lim[1] + NB + 'NM', color: css('--series-3') },
+      { label: '≥ ' + lim[1] + NB + 'NM', color: css('--series-2') },
+      { label: t('counts.band_unknown'), color: hexA(css('--text-3'), 0.45) }
+    ];
+  }
+  function bandSquare(k, label) {
+    return '<span class="band-sq band-' + k + '" role="img" aria-label="' + esc(label) + '" title="' + esc(label) + '"></span>';
+  }
+
   function renderCounts(data) {
     var s = data.series;
     var narrow = $('chart-counts').parentNode.clientWidth < 620;
@@ -233,13 +247,7 @@
       return new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(p.t + 'T00:00:00Z'));
     }
     // Vessels stacked by distance band; the band of a vessel is its furthest position in that hour, day or month.
-    var lim = data.bands || [20, 50];
-    var BANDS = [
-      { label: '< ' + lim[0] + NB + 'NM', color: css('--series-1') },
-      { label: lim[0] + '–' + lim[1] + NB + 'NM', color: css('--series-3') },
-      { label: '≥ ' + lim[1] + NB + 'NM', color: css('--series-2') },
-      { label: t('counts.band_unknown'), color: hexA(css('--text-3'), 0.45) }
-    ];
+    var BANDS = bandDefs(data.bands);
     var rows = s.map(function (p) {
       var b = (p.bands || [p.vessels, 0, 0, 0]).slice();
       var sum = b[0] + b[1] + b[2] + b[3];
@@ -542,6 +550,12 @@
   }
 
   // ---------- Range polar ----------
+  // Date (with year) and, when known, time of a range record; older records only have their day.
+  var fmtRecTime = dtf({ day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  var fmtRecDay = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  function recordWhen(r) {
+    return r.ts ? fmtRecTime.format(new Date(r.ts * 1000)) : fmtRecDay.format(new Date(r.day + 'T00:00:00Z'));
+  }
   function renderPolar(data) {
     var labels = [];
     for (var i = 0; i < 36; i++) {
@@ -565,7 +579,16 @@
           legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 2 } },
           tooltip: { callbacks: {
             title: function (items) { return t('range.sector', { a: items[0].dataIndex * 10, b: items[0].dataIndex * 10 + 10 }); },
-            label: function (i) { return ' ' + i.dataset.label + ' : ' + nmKm(i.raw); }
+            label: function (i) { return ' ' + i.dataset.label + ' : ' + nmKm(i.raw); },
+            // Who set the record and when; said once when the period's record is the all-time one.
+            afterLabel: function (i) {
+              var recs = i.datasetIndex === 0 ? data.period_rec : data.all_rec;
+              var r = recs && recs[i.dataIndex];
+              if (!r || !(i.raw > 0)) { return ''; }
+              var p = data.period_rec && data.period_rec[i.dataIndex];
+              if (i.datasetIndex === 1 && p && p.mmsi === r.mmsi && p.day === r.day && data.period[i.dataIndex] === i.raw) { return ''; }
+              return '   ' + vname(r) + ' · ' + recordWhen(r);
+            }
           } }
         },
         scales: { r: { beginAtZero: true, angleLines: { color: css('--grid') }, grid: { color: css('--grid') },
@@ -578,7 +601,8 @@
     var far = data.furthest || [];
     $('furthest-list').innerHTML = far.length ? far.map(function (v) {
       return '<li><span class="rank-main"><span class="flag">' + flag(v.country) + '</span>' + vlink(v) +
-        '<span class="type">' + esc((v.day ? fmtDayShort.format(new Date(v.day + 'T00:00:00Z')) : '') + (v.dir ? ' · ' + t('dir.' + v.dir) : '')) + '</span></span>' +
+        '<span class="type">' + esc((v.ts ? fmtDateTime.format(new Date(v.ts * 1000)) : (v.day ? fmtDayShort.format(new Date(v.day + 'T00:00:00Z')) : '')) +
+          (v.dir ? ' · ' + t('dir.' + v.dir) : '')) + '</span></span>' +
         '<span class="val">' + esc(nm(v.dist)) + '</span></li>';
     }).join('') : '<li class="empty">' + esc(t('range.empty')) + '</li>';
   }
@@ -839,14 +863,25 @@
       var head = '<div class="vd-head"><div><h2 id="ld-title">' + esc(title) + '</h2>' +
         '<p class="muted small">' + esc(timed ? t('list.subtitle_bar', { n: num(rows.length) }) : t('list.subtitle', { n: num(rows.length), p: periodLabel() })) + '</p></div>' +
         '<button type="button" class="icon-btn ld-close" aria-label="' + esc(t('vessel.close')) + '">✕</button></div>';
+      // A bar of the vessel chart: a square per vessel for its distance band, and the totals per band.
+      var bands = d.bands ? bandDefs(d.limits) : null;
+      var legend = '';
+      if (bands) {
+        legend = '<ul class="band-legend" aria-label="' + esc(t('list.bands')) + '">' + bands.map(function (b, k) {
+          return k === 0 || d.bands[k] > 0
+            ? '<li>' + bandSquare(k, b.label) + '<span>' + esc(b.label) + '</span> <strong>' + esc(num(d.bands[k])) + '</strong></li>' : '';
+        }).join('') + '</ul>';
+      }
       var table = rows.length ? '<table class="table"><tbody>' + rows.map(function (v) {
         var right = kind === 'route' ? t('top.passages_n', { n: num(v.passages) })
           : (v.msgs != null ? t('counts.msgs_n', { n: num(v.msgs) }) : fmtDateTime.format(new Date(v.last_seen * 1000)));
-        return '<tr><td><span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' + vlink(v) +
-          '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') + '</span></td>' +
+        var sq = bands ? bandSquare(v.band, bands[v.band] ? bands[v.band].label : '') : '';
+        return '<tr><td>' + sq + '<span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' + vlink(v) +
+          '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') +
+          (bands && v.dist != null ? ' · ' + nm(v.dist) : '') + '</span></td>' +
           '<td class="r">' + esc(right) + '</td></tr>';
       }).join('') + '</tbody></table>' : '<p class="empty">' + esc(t('top.empty')) + '</p>';
-      body.innerHTML = head + table + (d.truncated ? '<p class="muted small">' + esc(t('list.truncated')) + '</p>' : '');
+      body.innerHTML = head + legend + table + (d.truncated ? '<p class="muted small">' + esc(t('list.truncated')) + '</p>' : '');
       body.querySelector('.ld-close').addEventListener('click', function () { dlg.close(); });
     }).catch(function () {
       body.innerHTML = '<p>' + esc(t('error.load')) + '</p><button type="button" class="btn secondary ld-close">' + esc(t('vessel.close')) + '</button>';

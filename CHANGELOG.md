@@ -2,6 +2,15 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.1 — 2026-10-10
+
+Improvements
+- Vessel list of a chart bar (hour, day or month): a coloured square shows each vessel's distance band, with the same colours as the chart, and its furthest distance; the totals per band for the whole bar are shown at the top
+- Range by direction: the tooltip names the vessel that set each sector's record, with its date and time (for the period and all time)
+- Furthest vessels: time of the record next to its day
+
+Database: migration 006 (time of each range record; records of the last 30 days get their time from the sampled positions when a matching one exists), applied automatically.
+
 ## 1.1.0 — 2026-10-10
 
 New statistics

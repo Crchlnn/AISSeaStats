@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace AISSeaStats;
 
 /**
- * Statistics added in 1.1.0: vessels by distance band, propagation days, furthest vessels,
+ * Statistics added in 1.1.0 (record times in 1.1.1): vessels by distance band, propagation days, furthest vessels and records,
  * time between passages ("regulars"), busiest hours and station reception.
  * Read-only queries; times are shown in the station's time zone.
  */
@@ -130,22 +130,61 @@ final class Stats
      * Furthest vessels of the period, one line per vessel, with the day and direction of its record.
      * @return array<int, array<string, mixed>>
      */
-    public static function furthest(string $fromDay, int $limit = 5): array
+    public static function furthest(string $fromDay, ?\DateTimeZone $tz = null, int $limit = 5): array
     {
         $out = [];
         foreach (Db::all('SELECT mmsi, MAX(max_dist_nm) AS d FROM range_polar WHERE day >= ? GROUP BY mmsi ORDER BY d DESC LIMIT ' . max(1, $limit),
             [$fromDay]) as $r) {
-            $rec = Db::one('SELECT day, sector FROM range_polar WHERE mmsi = ? AND day >= ? ORDER BY max_dist_nm DESC, day DESC LIMIT 1',
+            $rec = Db::one('SELECT day, sector, ts FROM range_polar WHERE mmsi = ? AND day >= ? ORDER BY max_dist_nm DESC, day DESC LIMIT 1',
                 [(int) $r['mmsi'], $fromDay]);
             $v = Db::one('SELECT mmsi, name, country, shiptype, vclass, length_m FROM vessel WHERE mmsi = ?', [(int) $r['mmsi']])
                 ?? ['mmsi' => (int) $r['mmsi'], 'name' => null, 'country' => null, 'shiptype' => null, 'vclass' => '', 'length_m' => null];
             $out[] = $v + [
                 'dist' => (float) $r['d'],
                 'day' => $rec['day'] ?? null,
+                'ts' => $rec !== null ? self::timeOnDay($rec['ts'], (string) $rec['day'], $tz ?? new \DateTimeZone('UTC')) : null,
                 'dir' => $rec !== null ? Geo::sectorLabel((int) $rec['sector'] * 10 + 5) : null,
             ];
         }
         return $out;
+    }
+
+    /**
+     * The record of each 10° sector (since a day, or all time): vessel, day and, when known, time.
+     * A time not on the record's day (station time zone) is dropped: it can only come from an approximate backfill.
+     * @return array<int, array<string, mixed>|null> 36 entries, null for a sector without record
+     */
+    public static function sectorRecords(?string $fromDay, \DateTimeZone $tz): array
+    {
+        $out = array_fill(0, 36, null);
+        $rows = Db::all('SELECT x.sector, x.day, x.max_dist_nm, x.mmsi, x.ts, v.name, v.country FROM (
+                SELECT sector, day, max_dist_nm, mmsi, ts,
+                       ROW_NUMBER() OVER (PARTITION BY sector ORDER BY max_dist_nm DESC, day DESC) AS rn
+                FROM range_polar' . ($fromDay !== null ? ' WHERE day >= ?' : '') . '
+            ) x LEFT JOIN vessel v ON v.mmsi = x.mmsi WHERE x.rn = 1', $fromDay !== null ? [$fromDay] : []);
+        foreach ($rows as $r) {
+            $sector = (int) $r['sector'];
+            if ($sector < 0 || $sector > 35) {
+                continue;
+            }
+            $out[$sector] = [
+                'mmsi' => (int) $r['mmsi'],
+                'name' => $r['name'],
+                'country' => $r['country'],
+                'day' => (string) $r['day'],
+                'ts' => self::timeOnDay($r['ts'], (string) $r['day'], $tz),
+            ];
+        }
+        return $out;
+    }
+
+    /** The time of a record, or null when unknown or not on the record's day (station time zone). */
+    public static function timeOnDay(mixed $ts, string $day, \DateTimeZone $tz): ?int
+    {
+        if ($ts === null || $ts === '' || (int) $ts <= 0) {
+            return null;
+        }
+        return (new \DateTimeImmutable('@' . (int) $ts))->setTimezone($tz)->format('Y-m-d') === $day ? (int) $ts : null;
     }
 
     /**

@@ -285,6 +285,7 @@
   "list.subtitle_bar": "{n} navires",
   "list.subtitle_bar.one": "1 navire",
   "list.truncated": "Liste limitée aux 300 premiers navires.",
+  "list.bands": "Navires par tranche de distance",
   "admin.photos": "Photos de navires",
   "admin.photos_help": "Les photos libres sont cherchées automatiquement sur Wikimedia Commons et Wikidata, mais beaucoup de bateaux de pêche et de plaisance n'y figurent pas. Ajoutez vos propres photos ici (JPEG, PNG ou WebP, 3 Mo maximum) : elles sont stockées dans la base et prioritaires. N'utilisez que des photos dont vous avez les droits.",
   "admin.photo_mmsi": "MMSI du navire",

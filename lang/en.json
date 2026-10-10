@@ -285,6 +285,7 @@
   "list.subtitle_bar": "{n} vessels",
   "list.subtitle_bar.one": "1 vessel",
   "list.truncated": "List limited to the first 300 vessels.",
+  "list.bands": "Vessels by distance band",
   "admin.photos": "Vessel photos",
   "admin.photos_help": "Free photos are looked up automatically on Wikimedia Commons and Wikidata, but many fishing boats and pleasure craft are not there. Add your own photos here (JPEG, PNG or WebP, 3 MB max): they are stored in the database and take priority. Only use photos you have the rights to.",
   "admin.photo_mmsi": "Vessel MMSI",
