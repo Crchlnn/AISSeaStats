@@ -358,3 +358,51 @@ pre.cmd {
 .debug-list pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--surface-2); padding: 8px 10px; border-radius: 8px; max-height: 320px; overflow: auto; }
 .debug-summary .chip { margin: 2px 4px 2px 0; }
 .vd-noname { margin-top: 10px; }
+
+/* 1.1.0 — propagation days under the vessel chart */
+.prop-events { margin: 10px 0 0; color: var(--text-2); line-height: 1.6; }
+.prop-events b { color: var(--text); font-weight: 600; margin-right: 2px; }
+.ev-mark { display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px;
+  border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--series-2); }
+
+/* Furthest vessels (range card) */
+.rank-main { min-width: 0; }
+.rank-main .vlink { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+
+/* Regulars */
+.reg-every { display: block; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Busiest hours: weekday x hour heat map */
+.heatmap { display: grid; gap: 3px; margin-top: 4px; }
+.hm-row { display: grid; grid-template-columns: 34px repeat(24, minmax(0, 1fr)); gap: 2px; align-items: center; }
+.hm-day { font-size: 12px; color: var(--text-2); text-transform: capitalize; }
+.hm-head span { font-size: 11px; color: var(--text-3); text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: visible; }
+.hm-cell { display: block; aspect-ratio: 1 / 1; min-height: 10px; border-radius: 3px; background: var(--surface-2); }
+.hm-cell.nodata { background: transparent; outline: 1px dashed var(--grid); outline-offset: -1px; }
+.hm-legend { display: flex; align-items: center; gap: 3px; margin-top: 8px; font-size: 12px; color: var(--text-3); }
+.hm-legend .hm-cell { width: 14px; min-height: 14px; }
+.hm-legend span:first-child { margin-right: 4px; }
+.hm-legend span:last-child { margin-left: 4px; }
+
+/* Station reception strip */
+.uptime { display: grid; gap: 3px; overflow-x: auto; }
+.up-row { display: grid; grid-template-columns: 92px repeat(24, minmax(8px, 1fr)); gap: 2px; align-items: center; }
+.up-day { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.up-h { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.up-cell { display: block; height: 14px; border-radius: 2px; background: var(--surface-2); }
+.up-cell.ok { background: var(--good); }
+.up-cell.none { background: var(--critical); }
+.up-cell.now { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--text-3); }
+.up-cell.before, .up-cell.future, .up-cell.skip { background: var(--surface-2); }
+.up-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; font-size: 12px; color: var(--text-3); }
+.up-legend .up-cell { width: 14px; height: 10px; margin-left: 6px; }
+.up-legend .up-cell:first-child { margin-left: 0; }
+.up-gaps { margin-top: 10px; }
+@media (max-width: 560px) {
+  .up-row { grid-template-columns: 62px repeat(24, minmax(6px, 1fr)); gap: 1px; }
+  .up-day { font-size: 11px; }
+  .hm-row { grid-template-columns: 28px repeat(24, minmax(0, 1fr)); gap: 1px; }
+  .hm-head span { font-size: 10px; }
+}
+.reg-every { white-space: nowrap; }
+#regulars-table td.r { width: 1%; }

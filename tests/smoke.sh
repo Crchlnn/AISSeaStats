@@ -117,4 +117,12 @@ curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php?debug_log=$log" | grep -q '"shipnam
 code=$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" -b "$JAR" "$BASE/admin.php?debug_log=..%2F..%2Fsrc%2Fbootstrap.php")
 [ "$code" = "404" ] || fail "debug log download accepts a path ($code)"
 
+# 1.1.0 statistics: distance bands, propagation, furthest vessels, regulars, busiest hours, reception.
+for q in "counts&period=hour&days=2:bands" "counts&period=day&days=30:events" "counts&period=month&days=365&months=12:bands" \
+         "polar&days=30:furthest" "regulars&days=30:rows" "heatmap&days=30:cells" "uptime&days=30:strip"; do
+  url=${q%%:*}; key=${q##*:}
+  curl -s "$BASE/api.php?q=$url" | grep -q "\"$key\":" || fail "api $url has no $key"
+done
+curl -s "$BASE/" | grep -q 'id="regulars-table"' || fail "regulars card missing"
+
 echo "smoke test passed"

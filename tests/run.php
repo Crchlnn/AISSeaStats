@@ -16,6 +16,7 @@ use AISSeaStats\Ingest;
 use AISSeaStats\Migrator;
 use AISSeaStats\Rules;
 use AISSeaStats\Settings;
+use AISSeaStats\Stats;
 use AISSeaStats\Worker;
 
 $fail = 0;
@@ -117,6 +118,10 @@ check('eri tanker, passenger, unknown', Ingest::eriToAis(8021) === 89 && Ingest:
 // Debug capture
 check('debug mmsi list', AISSeaStats\Debug::parseMmsi('226007350, 12, 244150672;226007350') === [226007350, 244150672]);
 check('debug encode drops internal keys', AISSeaStats\Debug::encode(['mmsi' => 1, '_ts' => 5]) === '{"mmsi":1}');
+
+// Distance bands
+check('distance bands', Stats::band(null) === 3 && Stats::band(19.9) === 0 && Stats::band(20.0) === 1 && Stats::band(50.0) === 2);
+check('gaps between passages', Stats::gapsOf([['start_ts' => 0, 'end_ts' => 100], ['start_ts' => 400, 'end_ts' => 500], ['start_ts' => 1500, 'end_ts' => 1600]]) === [300, 1000]);
 
 // SMTP helpers
 check('smtp addresses', AISSeaStats\Smtp::addresses("a@x.fr; b@y.com\nnope, a@x.fr") === ['a@x.fr', 'b@y.com']);
@@ -291,6 +296,84 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     Settings::set('alerts', null);
     Alert::$http = null;
     Alert::$mailer = null;
+
+    // 1.1.0 statistics, on controlled data (2024) after emptying the tables they read.
+    foreach (['stats_hourly', 'stats_daily', 'vessel_daily', 'vessel_hourly', 'passage', 'range_polar'] as $t) {
+        Db::pdo()->exec("TRUNCATE TABLE {$t}");
+    }
+    $utc = new DateTimeZone('UTC');
+    // Distance bands: < 20, 20-50, >= 50 NM, unknown; per month a vessel counts once, at its furthest.
+    Ingest::bulk('INSERT INTO vessel_daily (day, mmsi, msgs, max_dist_nm) VALUES %s', [
+        ['2024-01-10', 900000001, 1, 5], ['2024-01-10', 900000002, 1, 25], ['2024-01-10', 900000003, 1, 60],
+        ['2024-01-10', 900000004, 1, null], ['2024-01-11', 900000001, 1, 70],
+    ]);
+    check('bands by day', (Stats::bandsByDay('2024-01-01')['2024-01-10'] ?? null) === [1, 1, 1, 1]);
+    check('bands by month', (Stats::bandsByMonth('2024-01-01')['2024-01'] ?? null) === [0, 1, 2, 1]);
+    // The hourly distance is recorded by ingestion (about 4.6 NM from the station).
+    $h0 = 1790100000;
+    (new Ingest($h0))->process([['mmsi' => 900000009, 'type' => 1, 'rxuxtime' => $h0, 'lat' => 52.0, 'lon' => 4.4792]]);
+    $hb = Stats::bandsByHour(intdiv($h0, 3600) * 3600);
+    check('bands by hour from ingestion', ($hb[intdiv($h0, 3600) * 3600] ?? null) === [1, 0, 0, 0]
+        && abs((float) Db::value('SELECT max_dist_nm FROM vessel_hourly WHERE mmsi = 900000009') - 4.6) < 0.2);
+    // Propagation: 20 ordinary days at 30 NM, then 100 NM with 3 vessels beyond 45 NM (event), then 100 NM with only 2 (no event).
+    $daily = [];
+    for ($i = 1; $i <= 20; $i++) {
+        $daily[] = [sprintf('2024-02-%02d', $i), 50, 1000, 30];
+    }
+    $daily[] = ['2024-02-21', 50, 1000, 100];
+    $daily[] = ['2024-02-22', 50, 1000, 100];
+    Ingest::bulk('INSERT INTO stats_daily (day, vessels, msgs, max_dist_nm) VALUES %s', $daily);
+    Ingest::bulk('INSERT INTO vessel_daily (day, mmsi, msgs, max_dist_nm) VALUES %s', [
+        ['2024-02-21', 900000001, 1, 60], ['2024-02-21', 900000002, 1, 70], ['2024-02-21', 900000003, 1, 100], ['2024-02-21', 900000004, 1, 10],
+        ['2024-02-22', 900000001, 1, 90], ['2024-02-22', 900000002, 1, 100], ['2024-02-22', 900000003, 1, 12],
+    ]);
+    $ev = Stats::propagation(new DateTimeImmutable('2024-02-15', $utc), new DateTimeImmutable('2024-02-22', $utc));
+    check('propagation day detected', count($ev) === 1 && $ev[0]['t'] === '2024-02-21' && $ev[0]['usual'] === 30.0 && $ev[0]['far'] === 3 && $ev[0]['threshold'] === 45.0);
+    check('median', Stats::median([3.0, 1.0, 2.0]) === 2.0 && Stats::median([4.0, 1.0, 2.0, 3.0]) === 2.5);
+    // Furthest vessels, with day and direction of the record (sector 31 = 310-320°, north-west).
+    Ingest::bulk('INSERT INTO range_polar (day, sector, max_dist_nm, mmsi) VALUES %s',
+        [['2024-02-21', 31, 100, 900000003], ['2024-02-21', 4, 70, 900000002], ['2024-02-20', 31, 20, 900000003]]);
+    $far = Stats::furthest('2024-02-01');
+    check('furthest vessels', count($far) === 3 && $far[0]['mmsi'] === 900000003 && $far[0]['dist'] === 100.0
+        && $far[0]['day'] === '2024-02-21' && $far[0]['dir'] === 'NW');
+    // Time between passages: A every 10 h (1 h long, so 9 h away), B irregular, C only 3 passages.
+    Ingest::bulk('INSERT IGNORE INTO vessel (mmsi, name, vclass, first_seen, last_seen) VALUES %s',
+        [[900000011, 'REGULAR', 'A', 1, 1], [900000012, 'IRREGULAR', 'A', 1, 1], [900000013, 'RARE', 'A', 1, 1]]);
+    $t0 = 1704067200; // 2024-01-01 00:00 UTC, a Monday
+    $passRows = [];
+    foreach ([0, 10, 20, 30, 40] as $hh) {
+        $passRows[] = [900000011, $t0 + $hh * 3600, $t0 + ($hh + 1) * 3600, 1];
+    }
+    foreach ([0, 3, 24, 30, 71] as $hh) {
+        $passRows[] = [900000012, $t0 + $hh * 3600, $t0 + ($hh + 1) * 3600, 1];
+    }
+    foreach ([0, 10, 20] as $hh) {
+        $passRows[] = [900000013, $t0 + $hh * 3600, $t0 + ($hh + 1) * 3600, 1];
+    }
+    Ingest::bulk('INSERT INTO passage (mmsi, start_ts, end_ts, closed) VALUES %s', $passRows);
+    $reg = Stats::regulars($t0 - 1);
+    check('regulars ranked by regularity', count($reg) === 2 && $reg[0]['mmsi'] === 900000011 && $reg[0]['avg'] === 32400
+        && $reg[0]['sd'] === 0 && $reg[0]['passages'] === 5 && $reg[0]['name'] === 'REGULAR' && $reg[1]['mmsi'] === 900000012);
+    $g = Stats::vesselGaps(900000011);
+    check('vessel gaps', $g !== null && $g['count'] === 4 && $g['avg'] === 32400 && $g['min'] === 32400 && $g['max'] === 32400);
+    check('gaps of a single passage', Stats::gapStats(Stats::gapsOf([['start_ts' => 1, 'end_ts' => 2]])) === null);
+    // Reception: 48 h from Monday 00:00 UTC, nothing received at 05:00, 06:00 and 07:00 on the first day.
+    $hours = [];
+    for ($i = 0; $i < 48; $i++) {
+        if ($i < 5 || $i > 7) {
+            $hours[] = [$t0 + $i * 3600, 10, 3];
+        }
+    }
+    Db::pdo()->exec('TRUNCATE TABLE stats_hourly'); // drop the hour written by the ingestion test above
+    Ingest::bulk('INSERT INTO stats_hourly (hour_ts, msgs, vessels) VALUES %s', $hours);
+    $up = Stats::uptime(2, 2, $t0 + 47 * 3600 + 60, $utc); // Tuesday 23:01: 47 hours completed
+    check('uptime share and gaps', $up['hours'] === 47 && $up['ok_hours'] === 44 && $up['uptime'] === 93.6
+        && $up['gaps_total'] === 1 && $up['longest'] === 3 && $up['gaps'][0]['from'] === $t0 + 5 * 3600);
+    check('uptime strip', count($up['strip']) === 2 && $up['strip'][0]['day'] === '2024-01-01'
+        && $up['strip'][0]['cells'][4] === 'ok' && $up['strip'][0]['cells'][5] === 'none' && $up['strip'][1]['cells'][23] === 'ok');
+    $hm = Stats::heatmap($t0, $utc);
+    check('heatmap by weekday and hour', $hm['hours'] === 45 && $hm['cells'][0][0] === 3.0 && $hm['cells'][0][5] === null
+        && $hm['cells'][1][5] === 3.0 && $hm['cells'][2][0] === null && $hm['max'] === 3.0);
 }
 
 echo "{$pass} passed, {$fail} failed\n";

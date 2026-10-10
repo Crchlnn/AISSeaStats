@@ -91,6 +91,7 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
       <span class="muted small" id="counts-note"></span>
     </div>
     <div class="chart-wrap tall"><canvas id="chart-counts" role="img" aria-label="<?= $t('counts.title') ?>"></canvas></div>
+    <p class="small prop-events" id="counts-events" hidden></p>
   </section>
 
   <section class="card">
@@ -147,8 +148,37 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
       <div class="card-head"><h2><?= $t('range.title') ?></h2></div>
       <div class="chart-wrap square"><canvas id="chart-polar" role="img" aria-label="<?= $t('range.title') ?>"></canvas></div>
       <p class="muted small" id="range-note"></p>
+      <h3 class="sub"><?= $t('range.furthest') ?></h3>
+      <ol id="furthest-list" class="rank compact"></ol>
+      <p class="muted small"><?= $t('range.tropo_hint') ?> <a href="https://dxinfocentre.com/tropo_eur.html" target="_blank" rel="noopener">dxinfocentre.com</a></p>
     </section>
   </div>
+
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <h2><?= $t('reg.title') ?></h2>
+        <span class="muted small"><?= $t('reg.hint') ?></span>
+      </div>
+      <table class="table" id="regulars-table"><tbody></tbody></table>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2><?= $t('heat.title') ?></h2></div>
+      <div id="heatmap" class="heatmap"></div>
+      <p class="muted small" id="heatmap-note"></p>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2><?= $t('up.title') ?></h2>
+      <span class="muted small" id="uptime-summary"></span>
+    </div>
+    <div id="uptime" class="uptime"></div>
+    <ol id="uptime-gaps" class="rank compact up-gaps" hidden></ol>
+    <p class="muted small"><?= $t('up.hint') ?></p>
+  </section>
 </main>
 
 <footer class="footer muted small">

@@ -2,6 +2,17 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.0 — 2026-10-10
+
+New statistics
+- Vessel chart split by distance band (under 20 NM, 20–50 NM, 50 NM and beyond, unknown), for 48 h, days and months
+- Exceptional propagation days (tropospheric ducting) flagged on the chart, with a link to the tropospheric forecast; furthest vessels of the period with day and direction
+- Regulars: vessels that come back most regularly; time between passages (average, shortest, longest) on the vessel card
+- Busiest hours: average vessels by weekday and hour (station time zone)
+- Station reception: hour-by-hour strip for the last 14 days, share of hours with messages and list of interruptions
+
+Database: migration 005 (distance per vessel and hour; the last 48 hours are filled from sampled positions), applied automatically.
+
 ## 1.0.0-beta.8 — 2026-10-06
 
 New

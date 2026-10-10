@@ -2,6 +2,17 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.0 — 10/10/2026
+
+Nouvelles statistiques
+- Graphique des navires par tranche de distance (moins de 20 NM, 20 à 50 NM, 50 NM et plus, inconnue), sur 48 h, par jour et par mois
+- Jours de propagation exceptionnelle (conduits troposphériques) signalés sur le graphique, avec un lien vers les prévisions ; navires les plus lointains de la période avec jour et direction
+- Habitués : les navires qui reviennent le plus régulièrement ; temps entre deux passages (moyen, minimum, maximum) sur la fiche navire
+- Heures d'affluence : navires en moyenne par jour de la semaine et par heure (fuseau de la station)
+- Réception de la station : bande heure par heure sur les 14 derniers jours, part des heures avec messages et liste des interruptions
+
+Base de données : migration 005 (distance par navire et par heure ; les 48 dernières heures sont reconstituées à partir des positions), appliquée automatiquement.
+
 ## 1.0.0-beta.8 — 06/10/2026
 
 Nouveautés

@@ -4,11 +4,15 @@ Long-term statistics for your [AIS-catcher](https://github.com/jvde-github/AIS-c
 
 AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it into one simple page:
 
-- **Vessels seen** per hour, day and month; click a bar to list them
+- **Vessels seen** per hour, day and month, split by distance (under 20 NM, 20–50 NM, beyond); click a bar to list them
+- **Propagation days** flagged when the station hears much further than usual (tropospheric ducting), and the **furthest vessels**
 - **Top routes**, inferred from where each vessel enters and leaves your coverage, drawn on a map
 - **Top vessels** by passages, days seen, length, speed and distance
 - **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
 - **Fleet** by type and flag, and **range by direction**
+- **Regulars**: vessels that come back most regularly, and the time between passages on each vessel card
+- **Busiest hours**: average traffic by weekday and hour
+- **Station reception**: hour-by-hour strip, share of hours with messages and interruptions
 - A **vessel card** on click: photo (your own, or Wikimedia Commons), identity, size, first and last seen, recent passages, track, links to aiscatcher.org, VesselFinder and ShipSpotting
 - **Alerts** when your station stops receiving: ntfy, Telegram, webhook or e-mail
 
@@ -152,6 +156,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.1.0 | 2026-10-10 | Vessel chart split by distance band; exceptional propagation days and furthest vessels; Regulars and time between passages; busiest hours (weekday × hour); station reception strip |
 | 1.0.0-beta.8 | 2026-10-06 | Debug capture also written to a dated JSON Lines file (contributed by @Phil353556); aiscatcher.org link on the vessel card instead of MarineTraffic, whose links no longer work |
 | 1.0.0-beta.7 | 2026-09-30 | Debug capture of raw messages in the admin; explanation when a vessel's name has not been received; 30/90-day charts always show the whole period |
 | 1.0.0-beta.6 | 2026-09-30 | Alerts when reception stops, and when it comes back: ntfy, Telegram, webhook (Discord, Slack, Gotify, Home Assistant…) and e-mail, with a test button; optional heartbeat URL to detect a station that is off; type of inland vessels from Inland AIS data; clearer database size in the admin |
@@ -173,6 +178,14 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 | Restore a backup | `gunzip -c aisseastats.sql.gz \| docker compose exec -T db sh -c 'mariadb -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats'` |
 | Uninstall (keeps data) | `docker compose down` |
 | Uninstall and delete data | `docker compose down -v` |
+
+## Reading the statistics
+
+- **Distance bands.** Each vessel is counted once per hour, day or month, in the band of its furthest position: under 20 NM, 20–50 NM, 50 NM and beyond, or *distance unknown* (no position received, or hours recorded before 1.1.0).
+- **Exceptional propagation.** A day is flagged (orange triangle above the bar) when its range is at least twice the usual range (median of the 30 previous days), at least 20 NM more, and at least 3 vessels were heard beyond 1.5 × the usual range. Beyond the horizon, VHF reception depends on tropospheric ducting, which follows the weather: see the forecast on [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html).
+- **Regulars.** Time between passages is measured from the end of one passage to the start of the next (a passage ends after 2 hours without hearing the vessel). Vessels with at least 4 passages in the period are ranked by how steady that time is. A vessel moored at the edge of coverage, heard on and off, can count several short passages.
+- **Busiest hours.** Average number of vessels per hour, by weekday and hour in the station's time zone, over the period (at least 7 days). Hours without any message are left out, so an outage does not look like calm.
+- **Station reception.** One cell per hour: green when messages were received, red when none were. At a station that always hears a shore base station, red means an outage; in a quiet area it can also mean no traffic. To be warned of outages, see [Alerts](#alerts).
 
 ## Admin page
 

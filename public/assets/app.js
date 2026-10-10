@@ -181,7 +181,7 @@
       return existing;
     }
     if (existing) { existing.destroy(); }
-    config.plugins = (config.plugins || []).concat(id === 'chart-counts' ? [midnightPlugin] : []);
+    config.plugins = (config.plugins || []).concat(id === 'chart-counts' ? [midnightPlugin, eventPlugin] : []);
     state.charts[id] = new Chart($(id), config);
     return state.charts[id];
   }
@@ -232,35 +232,66 @@
       if (data.period === 'month') { return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(p.t + '-01T00:00:00Z')); }
       return new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(p.t + 'T00:00:00Z'));
     }
-    var color = css('--series-1');
+    // Vessels stacked by distance band; the band of a vessel is its furthest position in that hour, day or month.
+    var lim = data.bands || [20, 50];
+    var BANDS = [
+      { label: '< ' + lim[0] + NB + 'NM', color: css('--series-1') },
+      { label: lim[0] + '–' + lim[1] + NB + 'NM', color: css('--series-3') },
+      { label: '≥ ' + lim[1] + NB + 'NM', color: css('--series-2') },
+      { label: t('counts.band_unknown'), color: hexA(css('--text-3'), 0.45) }
+    ];
+    var rows = s.map(function (p) {
+      var b = (p.bands || [p.vessels, 0, 0, 0]).slice();
+      var sum = b[0] + b[1] + b[2] + b[3];
+      if (p.vessels > sum) { b[3] += p.vessels - sum; } // hour not split yet: shown as "unknown"
+      return b;
+    });
+    function total(i) { var b = rows[i]; return b[0] + b[1] + b[2] + b[3]; }
+    var shown = BANDS.map(function (_, k) { return k === 0 || rows.some(function (b) { return b[k] > 0; }); });
+    var order = [];
+    shown.forEach(function (on, k) { if (on) { order.push(k); } });
+    // Rounded top only on the highest non-empty segment of each bar; 2 px surface gap between segments.
+    var topOf = rows.map(function (b) { var top = -1; order.forEach(function (k) { if (b[k] > 0) { top = k; } }); return top; });
+    var surface = css('--surface');
+    var datasets = order.map(function (k) {
+      return {
+        label: BANDS[k].label,
+        bandIndex: k,
+        data: rows.map(function (b) { return b[k]; }),
+        backgroundColor: BANDS[k].color,
+        hoverBackgroundColor: BANDS[k].color,
+        borderColor: surface,
+        borderWidth: function (ctx) { return topOf[ctx.dataIndex] === k ? 0 : { top: 2 }; },
+        borderRadius: function (ctx) { return topOf[ctx.dataIndex] === k ? { topLeft: 4, topRight: 4 } : 0; },
+        borderSkipped: 'bottom',
+        maxBarThickness: 28,
+        categoryPercentage: 0.86,
+        barPercentage: 0.92,
+        stack: 'v'
+      };
+    });
     makeChart('chart-counts', {
       type: 'bar',
-      data: {
-        labels: labels,
-        datasets: [{
-          label: t('counts.vessels'),
-          data: s.map(function (p) { return p.vessels; }),
-          backgroundColor: color,
-          hoverBackgroundColor: css('--accent'),
-          borderRadius: { topLeft: 4, topRight: 4 },
-          borderSkipped: 'bottom',
-          maxBarThickness: 28,
-          categoryPercentage: 0.86,
-          barPercentage: 0.92
-        }]
-      },
+      data: { labels: labels, datasets: datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: false },
+          legend: {
+            display: datasets.length > 1, position: 'top', align: 'end',
+            labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded', padding: 12 },
+            onClick: function () { /* bands stay visible: totals must add up */ }
+          },
           tooltip: {
+            filter: function (item) { return item.raw > 0; },
+            itemSort: function (a, b) { return b.datasetIndex - a.datasetIndex; },
             callbacks: {
               title: function (items) { return barTitle(items[0].dataIndex); },
-              label: function (item) { return ' ' + t('counts.vessels_n', { n: num(item.raw) }); },
+              label: function (item) { return ' ' + t('counts.band_n', { b: item.dataset.label, n: num(item.raw) }); },
               afterBody: function (items) {
-                var p = s[items[0].dataIndex];
-                var lines = [t('counts.msgs_n', { n: num(p.msgs) })];
+                var i = items.length ? items[0].dataIndex : 0;
+                var p = s[i];
+                var lines = [t('counts.vessels_n', { n: num(total(i)) }), t('counts.msgs_n', { n: num(p.msgs) })];
                 if (p['new'] != null) { lines.push(t('counts.new_n', { n: num(p['new']) })); }
                 if (p.range != null) { lines.push(t('counts.range_n', { d: nm(p.range) })); }
                 return lines;
@@ -271,6 +302,7 @@
         scales: {
           x: data.period === 'hour' ? {
             // Every 3 h (6 h on a phone), and the date under each midnight: 00:00 / 29 sept.
+            stacked: true,
             grid: { display: false },
             ticks: {
               autoSkip: false, maxRotation: 0,
@@ -282,28 +314,62 @@
                 return h === 0 ? [this.getLabelForValue(value), fmtDayMonth.format(new Date(p.t * 1000))] : this.getLabelForValue(value);
               }
             }
-          } : { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
-          y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0 }, title: { display: true, text: t('counts.axis') } }
+          } : { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+          y: { stacked: true, beginAtZero: true, border: { display: false }, ticks: { precision: 0 }, title: { display: true, text: t('counts.axis') } }
         },
         // Click a bar to list the vessels of that hour, day or month.
         onClick: function (evt, elements) {
           if (!elements.length) { return; }
           var i = elements[0].index, p = s[i];
-          if (!p || !p.vessels) { return; }
+          if (!p || !total(i)) { return; }
           showList(data.period === 'hour' ? { by: 'hour', t: p.t } : { by: data.period, value: p.t }, barTitle(i));
         },
         onHover: function (evt, elements) {
-          var p = elements.length ? s[elements[0].index] : null;
-          evt.native.target.style.cursor = p && p.vessels ? 'pointer' : 'default';
+          var ok = elements.length && total(elements[0].index) > 0;
+          evt.native.target.style.cursor = ok ? 'pointer' : 'default';
         }
       }
     });
     var chart = state.charts['chart-counts'];
     chart.$midnights = data.period === 'hour' ? s.map(function (p, i) { return localHour(p.t) === 0 ? i : -1; }).filter(function (i) { return i > 0; }) : [];
+    // Propagation days: a marker above the bar, and a line under the chart.
+    var events = data.events || [];
+    var byDay = {};
+    events.forEach(function (e) { byDay[e.t] = true; });
+    chart.$events = data.period === 'day' ? s.map(function (p, i) { return byDay[p.t] ? { i: i, total: total(i) } : null; }).filter(Boolean) : [];
+    chart.$eventColor = css('--series-2');
     chart.draw();
-    var total = s.reduce(function (a, p) { return a + p.vessels; }, 0);
-    $('counts-note').textContent = total === 0 ? t('counts.empty') : t('counts.note.' + data.period);
+    var sumAll = rows.reduce(function (a, b, i) { return a + total(i); }, 0);
+    $('counts-note').textContent = sumAll === 0 ? t('counts.empty') : t('counts.note.' + data.period);
+    var ev = $('counts-events');
+    if (!events.length) {
+      ev.hidden = true;
+      ev.innerHTML = '';
+    } else {
+      ev.hidden = false;
+      ev.innerHTML = '<span class="ev-mark" aria-hidden="true"></span><b>' + esc(t('prop.title')) + '</b> ' + events.map(function (e) {
+        return esc(t('prop.item', {
+          d: fmtDayShort.format(new Date(e.t + 'T00:00:00Z')), max: nm(e.max), n: num(e.far), th: nm(e.threshold), usual: nm(e.usual)
+        }));
+      }).join(' · ') + ' · <a href="https://dxinfocentre.com/tropo_eur.html" target="_blank" rel="noopener">' + esc(t('prop.forecast')) + '</a>';
+    }
   }
+  // Small triangle above the bar of a propagation day.
+  var eventPlugin = {
+    id: 'propagation',
+    afterDatasetsDraw: function (chart) {
+      var evs = chart.$events || [];
+      if (!evs.length) { return; }
+      var x = chart.scales.x, y = chart.scales.y, ctx = chart.ctx;
+      ctx.save();
+      ctx.fillStyle = chart.$eventColor;
+      evs.forEach(function (e) {
+        var px = x.getPixelForValue(e.i), py = y.getPixelForValue(e.total) - 6;
+        ctx.beginPath(); ctx.moveTo(px - 5, py - 7); ctx.lineTo(px + 5, py - 7); ctx.lineTo(px, py); ctx.closePath(); ctx.fill();
+      });
+      ctx.restore();
+    }
+  };
 
   // ---------- Routes ----------
   function baseMap(el, opts) {
@@ -509,6 +575,129 @@
     });
     var maxP = Math.max.apply(null, data.period);
     $('range-note').textContent = maxP > 0 ? t('range.note', { d: nmKm(maxP) }) : t('range.empty');
+    var far = data.furthest || [];
+    $('furthest-list').innerHTML = far.length ? far.map(function (v) {
+      return '<li><span class="rank-main"><span class="flag">' + flag(v.country) + '</span>' + vlink(v) +
+        '<span class="type">' + esc((v.day ? fmtDayShort.format(new Date(v.day + 'T00:00:00Z')) : '') + (v.dir ? ' · ' + t('dir.' + v.dir) : '')) + '</span></span>' +
+        '<span class="val">' + esc(nm(v.dist)) + '</span></li>';
+    }).join('') : '<li class="empty">' + esc(t('range.empty')) + '</li>';
+  }
+
+  // ---------- Durations ----------
+  function dur(sec) {
+    sec = Math.max(0, Number(sec) || 0);
+    if (sec < 3600) { return t('time.minutes', { n: Math.max(1, Math.round(sec / 60)) }); }
+    if (sec < 3 * 3600 && Math.round(sec / 60) % 60 !== 0) {
+      var m = Math.round(sec / 60);
+      return t('dur.hm', { h: Math.floor(m / 60), m: String(m % 60).padStart(2, '0') });
+    }
+    if (sec < 48 * 3600) { return t('time.hours', { n: Math.round(sec / 3600) }); }
+    return t('dur.days', { n: nf1.format(sec / 86400) });
+  }
+
+  // ---------- Regulars (time between passages) ----------
+  function renderRegulars(data) {
+    var tbody = $('regulars-table').querySelector('tbody');
+    var rows = data.rows || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td class="empty">' + esc(t('reg.empty')) + '</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function (v, i) {
+      return '<tr><td class="rank-n">' + (i + 1) + '</td><td><span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' +
+        vlink(v) + '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + ' · ' + esc(t('top.passages_n', { n: num(v.passages) })) + '</span></td>' +
+        '<td class="r"><span class="reg-every">' + esc(t('reg.every', { d: dur(v.avg) })) + '</span>' +
+        '<span class="type">' + esc(t('reg.spread', { d: dur(v.sd) })) + '</span></td></tr>';
+    }).join('');
+  }
+
+  // ---------- Busiest hours (weekday x hour) ----------
+  var WEEKDAYS = [];
+  (function () {
+    var f = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' });
+    var fl = new Intl.DateTimeFormat(locale, { weekday: 'long', timeZone: 'UTC' });
+    for (var d = 0; d < 7; d++) {
+      var date = new Date(Date.UTC(2024, 0, 1 + d)); // 1 Jan 2024 was a Monday
+      WEEKDAYS.push({ s: f.format(date).replace(/\.$/, ''), l: fl.format(date) });
+    }
+  })();
+  function hh(h) { return String(h).padStart(2, '0') + ':00'; }
+  function renderHeatmap(data) {
+    var el = $('heatmap');
+    var max = data.max || 0;
+    if (!data.hours || max <= 0) {
+      el.innerHTML = '<p class="empty">' + esc(t('heat.empty')) + '</p>';
+      $('heatmap-note').textContent = '';
+      return;
+    }
+    var html = '<div class="hm-row hm-head"><span></span>';
+    for (var h = 0; h < 24; h++) { html += '<span class="hm-h' + (h % 6 === 0 ? ' major' : (h % 3 === 0 ? ' minor' : '')) + '">' + (h % 3 === 0 ? h : '') + '</span>'; }
+    html += '</div>';
+    var best = null, low = null;
+    data.cells.forEach(function (row, d) {
+      html += '<div class="hm-row"><span class="hm-day" title="' + esc(WEEKDAYS[d].l) + '">' + esc(WEEKDAYS[d].s) + '</span>';
+      row.forEach(function (v, h) {
+        var tip = WEEKDAYS[d].l + ' ' + hh(h) + '–' + hh((h + 1) % 24) + ' · ' + (v == null ? t('heat.nodata') : t('heat.avg', { n: nf1.format(v) }));
+        html += '<span class="hm-cell' + (v == null ? ' nodata' : '') + '" data-v="' + (v == null ? '' : v) + '" title="' + esc(tip) + '" aria-label="' + esc(tip) + '"></span>';
+        if (v != null) {
+          if (!best || v > best.v) { best = { v: v, d: d, h: h }; }
+          if (!low || v < low.v) { low = { v: v, d: d, h: h }; }
+        }
+      });
+      html += '</div>';
+    });
+    html += '<div class="hm-legend"><span>' + esc(t('heat.less')) + '</span>';
+    for (var k = 1; k <= 5; k++) { html += '<span class="hm-cell" data-v="' + (max * k / 5) + '"></span>'; }
+    html += '<span>' + esc(t('heat.more', { n: nf1.format(max) })) + '</span></div>';
+    el.innerHTML = html;
+    var accent = css('--series-1');
+    Array.prototype.forEach.call(el.querySelectorAll('.hm-cell[data-v]'), function (c) {
+      var v = c.getAttribute('data-v');
+      if (v === '') { return; }
+      c.style.backgroundColor = hexA(accent, 0.1 + 0.9 * Math.min(1, Number(v) / max)); // CSSOM, allowed by the CSP
+    });
+    $('heatmap-note').textContent = t('heat.note', {
+      days: num(data.days),
+      best: WEEKDAYS[best.d].l + ' ' + hh(best.h), bv: nf1.format(best.v),
+      low: WEEKDAYS[low.d].l + ' ' + hh(low.h), lv: nf1.format(low.v)
+    });
+  }
+
+  // ---------- Station reception (uptime) ----------
+  var fmtDayWeek = new Intl.DateTimeFormat(locale, { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
+  function renderUptime(data) {
+    var el = $('uptime');
+    var strip = data.strip || [];
+    var labels = { ok: t('up.ok'), none: t('up.none'), now: t('up.now'), before: t('up.before'), future: '', skip: '' };
+    var html = '<div class="up-row up-head"><span></span>';
+    for (var h = 0; h < 24; h++) { html += '<span class="up-h">' + (h % 6 === 0 ? h : '') + '</span>'; }
+    html += '</div>';
+    strip.forEach(function (r) {
+      var date = new Date(r.day + 'T00:00:00Z');
+      var day = fmtDayWeek.format(date);
+      html += '<div class="up-row"><span class="up-day" title="' + esc(day) + '">' + esc(fmtDayShort.format(date)) + '</span>';
+      r.cells.forEach(function (c, h) {
+        var tip = labels[c] ? day + ' ' + hh(h) + ' · ' + labels[c] : '';
+        html += '<span class="up-cell ' + c + '"' + (tip ? ' title="' + esc(tip) + '" aria-label="' + esc(tip) + '"' : ' aria-hidden="true"') + '></span>';
+      });
+      html += '</div>';
+    });
+    html += '<div class="up-legend"><span class="up-cell ok"></span>' + esc(t('up.ok')) + '<span class="up-cell none"></span>' + esc(t('up.none')) +
+      '<span class="up-cell before"></span>' + esc(t('up.before')) + '</div>';
+    el.innerHTML = html;
+    var sum = $('uptime-summary');
+    if (data.uptime == null) {
+      sum.textContent = t('up.waiting');
+    } else {
+      sum.textContent = t('up.summary', { p: nf1.format(data.uptime), period: periodLabel() }) + ' · ' +
+        (data.gaps_total ? t('up.gaps', { n: num(data.gaps_total), d: dur(data.longest * 3600) }) : t('up.nogap'));
+    }
+    var gl = $('uptime-gaps');
+    gl.innerHTML = (data.gaps || []).map(function (g) {
+      return '<li><span>' + esc(fmtDateTime.format(new Date(g.from * 1000)) + ' → ' + fmtDateTime.format(new Date(g.to * 1000))) + '</span>' +
+        '<span class="val">' + esc(dur(g.hours * 3600)) + '</span></li>';
+    }).join('');
+    gl.hidden = !(data.gaps || []).length;
   }
   function hexA(hex, a) {
     var m = /^#?([0-9a-f]{6})$/i.exec(hex);
@@ -543,6 +732,7 @@
         [t('vessel.first_seen'), fmtDate.format(new Date(v.first_seen * 1000))],
         [t('vessel.last_seen'), fmtDateTime.format(new Date(v.last_seen * 1000)) + ' (' + ago(v.last_seen) + ')'],
         [t('vessel.passages'), num(v.passages) + ' · ' + t('top.days_n', { n: num(v.days_seen) })],
+        [t('vessel.gaps'), v.gaps ? t('vessel.gaps_val', { avg: dur(v.gaps.avg), min: dur(v.gaps.min), max: dur(v.gaps.max) }) : null],
         [t('vessel.max_dist'), nmKm(v.max_dist_nm)],
         [t('vessel.max_speed'), v.max_speed_kn != null ? nf1.format(v.max_speed_kn) + ' kn' : null],
         [t('vessel.msgs'), num(v.msgs)]
@@ -744,6 +934,9 @@
     api('routes', { days: days }).then(current(k, function (d) { last.routes = d; renderRoutes(d); })).catch(fail('routes'));
     api('fleet', { days: days }).then(current(k, function (d) { last.fleet = d; renderFleet(d); })).catch(fail('fleet'));
     api('polar', { days: days }).then(current(k, function (d) { last.polar = d; renderPolar(d); })).catch(fail('polar'));
+    api('regulars', { days: days }).then(current(k, function (d) { renderRegulars(d); })).catch(fail('regulars'));
+    api('heatmap', { days: days }).then(current(k, function (d) { last.heatmap = d; renderHeatmap(d); })).catch(fail('heatmap'));
+    api('uptime', { days: days }).then(current(k, function (d) { renderUptime(d); })).catch(fail('uptime'));
     loadTop();
   }
   function stamp() { $('updated').textContent = t('refresh.at', { t: fmtHour.format(new Date()) }); }
@@ -753,6 +946,7 @@
     if (last.fleet) { renderFleet(last.fleet); }
     if (last.polar) { renderPolar(last.polar); }
     if (last.routes) { renderRoutes(last.routes); }
+    if (last.heatmap) { renderHeatmap(last.heatmap); }
   }
 
   chartTheme();

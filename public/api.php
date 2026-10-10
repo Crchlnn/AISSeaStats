@@ -12,6 +12,7 @@ use AISSeaStats\Db;
 use AISSeaStats\Destinations;
 use AISSeaStats\Enrich;
 use AISSeaStats\Settings;
+use AISSeaStats\Stats;
 use AISSeaStats\Web;
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
@@ -65,6 +66,15 @@ try {
             Web::json(fleet($sinceDay, $sinceTs), 200, 60);
         case 'polar':
             Web::json(polar($sinceDay), 200, 60);
+        case 'regulars':
+            // At most a year: regular patterns older than that say little about today's traffic.
+            Web::json(['rows' => Stats::regulars(max($sinceTs, $today->modify('-365 days')->getTimestamp()))], 200, 300);
+        case 'heatmap':
+            // At least a week, so that every weekday is present.
+            $hmDays = max(7, $days);
+            Web::json(['days' => $hmDays] + Stats::heatmap($today->modify('-' . ($hmDays - 1) . ' days')->getTimestamp(), $tz), 200, 300);
+        case 'uptime':
+            Web::json(Stats::uptime($days, min($days, 14), $now, $tz), 200, 60);
         case 'vessel':
             Web::json(vessel((int) ($_GET['mmsi'] ?? 0)), 200, 30);
         case 'photo':
@@ -126,10 +136,13 @@ function counts(string $period, DateTimeImmutable $today, int $now, int $days = 
         foreach (Db::all('SELECT hour_ts, vessels, msgs FROM stats_hourly WHERE hour_ts >= ?', [$from]) as $r) {
             $rows[(int) $r['hour_ts']] = $r;
         }
+        $bands = Stats::bandsByHour($from);
         for ($h = $from; $h <= $now; $h += 3600) {
-            $out[] = ['t' => $h, 'vessels' => (int) ($rows[$h]['vessels'] ?? 0), 'msgs' => (int) ($rows[$h]['msgs'] ?? 0)];
+            $out[] = ['t' => $h, 'vessels' => (int) ($rows[$h]['vessels'] ?? 0), 'msgs' => (int) ($rows[$h]['msgs'] ?? 0),
+                'bands' => $bands[$h] ?? [0, 0, 0, 0]];
         }
-        return ['period' => 'hour', 'series' => $out];
+        return ['period' => 'hour', 'series' => $out, 'bands' => Stats::BAND_LIMITS,
+            'events' => Stats::propagation($today->modify('-1 day'), $today)];
     }
     if ($period === 'month') {
         if ($months <= 0) {
@@ -143,30 +156,30 @@ function counts(string $period, DateTimeImmutable $today, int $now, int $days = 
         } else {
             $from = $today->modify('first day of this month')->modify('-' . (min(120, $months) - 1) . ' months');
         }
-        $v = [];
-        foreach (Db::all("SELECT DATE_FORMAT(day, '%Y-%m') m, COUNT(DISTINCT mmsi) c FROM vessel_daily
-                          WHERE day >= ? GROUP BY m", [$from->format('Y-m-d')]) as $r) {
-            $v[$r['m']] = (int) $r['c'];
-        }
         $msgs = [];
         foreach (Db::all("SELECT DATE_FORMAT(day, '%Y-%m') m, SUM(msgs) c FROM msgtype_daily
                           WHERE day >= ? GROUP BY m", [$from->format('Y-m-d')]) as $r) {
             $msgs[$r['m']] = (int) $r['c'];
         }
+        // Unique vessels per month = the sum of its distance bands (each vessel is in exactly one band).
+        $bands = Stats::bandsByMonth($from->format('Y-m-d'));
         for ($m = $from; $m <= $today; $m = $m->modify('+1 month')) {
             $k = $m->format('Y-m');
-            $out[] = ['t' => $k, 'vessels' => $v[$k] ?? 0, 'msgs' => $msgs[$k] ?? 0];
+            $b = $bands[$k] ?? [0, 0, 0, 0];
+            $out[] = ['t' => $k, 'vessels' => array_sum($b), 'msgs' => $msgs[$k] ?? 0, 'bands' => $b];
         }
-        return ['period' => 'month', 'series' => $out];
+        return ['period' => 'month', 'series' => $out, 'bands' => Stats::BAND_LIMITS, 'events' => []];
     }
     $from = $today->modify('-' . (max(7, min(366, $days)) - 1) . ' days');
     $rows = [];
     foreach (Db::all('SELECT day, vessels, msgs, new_vessels, max_dist_nm FROM stats_daily WHERE day >= ?', [$from->format('Y-m-d')]) as $r) {
         $rows[(string) $r['day']] = $r;
     }
+    $bands = Stats::bandsByDay($from->format('Y-m-d'));
     for ($d = $from; $d <= $today; $d = $d->modify('+1 day')) {
         $k = $d->format('Y-m-d');
         $out[] = [
+            'bands' => $bands[$k] ?? [0, 0, 0, 0],
             't' => $k,
             'vessels' => (int) ($rows[$k]['vessels'] ?? 0),
             'msgs' => (int) ($rows[$k]['msgs'] ?? 0),
@@ -174,7 +187,7 @@ function counts(string $period, DateTimeImmutable $today, int $now, int $days = 
             'range' => isset($rows[$k]['max_dist_nm']) ? (float) $rows[$k]['max_dist_nm'] : null,
         ];
     }
-    return ['period' => 'day', 'series' => $out];
+    return ['period' => 'day', 'series' => $out, 'bands' => Stats::BAND_LIMITS, 'events' => Stats::propagation($from, $today)];
 }
 
 /** @return array<string, mixed> */
@@ -259,7 +272,7 @@ function polar(DateTimeImmutable $sinceDay): array
     foreach (Db::all('SELECT sector, MAX(max_dist_nm) m FROM range_polar GROUP BY sector') as $r) {
         $all[(int) $r['sector']] = (float) $r['m'];
     }
-    return ['period' => $period, 'all' => $all];
+    return ['period' => $period, 'all' => $all, 'furthest' => Stats::furthest($sinceDay->format('Y-m-d'))];
 }
 
 /** @return array<string, mixed> */
@@ -272,6 +285,7 @@ function vessel(int $mmsi): array
         Web::json(['error' => 'not found'], 404);
     }
     $v['days_seen'] = (int) Db::value('SELECT COUNT(*) FROM vessel_daily WHERE mmsi = ?', [$mmsi]);
+    $v['gaps'] = Stats::vesselGaps($mmsi);
     $v['recent_passages'] = Db::all('SELECT start_ts, end_ts, entry_zone, exit_zone, max_dist_nm, moved_nm, closed
         FROM passage WHERE mmsi = ? ORDER BY start_ts DESC LIMIT 8', [$mmsi]);
     $lastPos = (int) ($v['last_pos_ts'] ?? 0);

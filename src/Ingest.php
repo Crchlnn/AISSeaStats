@@ -294,7 +294,7 @@ final class Ingest
         unset($h);
         $this->mType[$day][$type] = ($this->mType[$day][$type] ?? 0) + 1;
         if (!$infra) {
-            $this->vHourly[$hour][$mmsi] = true;
+            $this->vHourly[$hour][$mmsi] ??= null; // value: furthest distance this hour, set by handlePosition()
             $vd = &$this->vDaily[$day][$mmsi];
             $vd ??= ['msgs' => 0, 'dist' => null];
             $vd['msgs']++;
@@ -392,6 +392,8 @@ final class Ingest
             $vd = &$this->vDaily[$day][$mmsi];
             $vd['dist'] = $vd['dist'] === null ? $dist : max($vd['dist'], $dist);
             unset($vd);
+            $vh = $this->vHourly[$hour][$mmsi] ?? null;
+            $this->vHourly[$hour][$mmsi] = $vh === null ? $dist : max($vh, $dist);
             $sector = (int) floor($brg / 10) % 36;
             $key = $day . '|' . $sector;
             if (!isset($this->polar[$key]) || $dist > $this->polar[$key]['dist']) {
@@ -589,11 +591,12 @@ final class Ingest
 
         $rows = [];
         foreach ($this->vHourly as $hour => $set) {
-            foreach (array_keys($set) as $mmsi) {
-                $rows[] = [$hour, $mmsi];
+            foreach ($set as $mmsi => $dist) {
+                $rows[] = [$hour, $mmsi, $dist];
             }
         }
-        self::bulk('INSERT IGNORE INTO vessel_hourly (hour_ts, mmsi) VALUES %s', $rows);
+        self::bulk('INSERT INTO vessel_hourly (hour_ts, mmsi, max_dist_nm) VALUES %s
+            ON DUPLICATE KEY UPDATE max_dist_nm = GREATEST(COALESCE(max_dist_nm, VALUES(max_dist_nm)), COALESCE(VALUES(max_dist_nm), max_dist_nm))', $rows);
 
         $rows = [];
         foreach ($this->vDaily as $day => $set) {
