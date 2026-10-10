@@ -130,4 +130,10 @@ curl -s "$BASE/api.php?q=polar&days=30" | grep -q '"all_rec":\[.*"mmsi":24403047
 curl -s "$BASE/api.php?q=list&by=day&value=${day}" | grep -q '"band":[0-3].*"bands":\[' || fail "day list without distance bands"
 curl -s "$BASE/api.php?q=list&by=flag&value=FR&days=30" | grep -q '"bands":' && fail "flag list has distance bands"
 
+# 1.1.2: Top vessels and Regulars by page; a bar's vessel list sorted by distance and limited to one band.
+curl -s "$BASE/api.php?q=top&by=passages&days=30&limit=20&page=0" | grep -q '"total":[0-9].*"page":0,"limit":20' || fail "top without paging"
+curl -s "$BASE/api.php?q=regulars&days=30&limit=50" | grep -q '"limit":50' || fail "regulars without paging"
+curl -s "$BASE/api.php?q=list&by=day&value=${day}&sort=dist&band=0" | grep -q '"sort":"dist","band":0' || fail "day list without sort or band"
+curl -s "$BASE/api.php?q=list&by=day&value=${day}&band=2" | grep -q '"mmsi":244030470' && fail "band filter lets other bands through"
+
 echo "smoke test passed"

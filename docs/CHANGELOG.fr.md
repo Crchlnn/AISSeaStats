@@ -2,6 +2,21 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.2 — 10/10/2026
+
+Installation et mises à jour
+- Image toute prête `ghcr.io/crchlnn/aisseastats` (arm64 et amd64), utilisée par défaut : `install.sh` la télécharge (environ une minute) et ne construit l'image sur la machine que si le téléchargement échoue ; `./install.sh --build` la construit toujours. Mise à jour : `docker compose pull && docker compose up -d`, ou `docker compose up -d --build` comme avant ; les deux peuvent alterner sur la même station
+- `AISSEASTATS_VERSION` dans `.env` fixe une étiquette d'image (`1.1`, `1.1.2`…) ; vide = dernière version
+- Installation sans Git documentée (`docker-compose.yml` et `.env` seulement), ainsi que les outils de mise à jour automatique comme Watchtower
+- Publication de l'image : vérifie que l'étiquette Git correspond à la version, `latest` seulement pour les versions finales (pas les bêtas), `edge` pour un lancement manuel sur main, plus d'attestation affichée comme plateforme « unknown »
+
+Améliorations
+- Top navires et habitués : 10, 20, 50 ou 100 par page (mémorisé), avec pages précédente / suivante ; retour à la page 1 quand la période ou le classement change
+- Liste des navires d'une barre : tri par messages (par nom pour une heure) ou par distance ; un clic sur une tranche de distance ne liste que ses navires (jusqu'à 300 par tranche), un second clic les montre tous
+- Dans cette liste, les distances sont arrondies vers le bas : un navire à 19,96 NM s'affiche 19,9 NM à côté de son carré « < 20 NM »
+
+Pas de migration de base de données.
+
 ## 1.1.1 — 10/10/2026
 
 Améliorations

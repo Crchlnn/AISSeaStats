@@ -21,6 +21,39 @@ final class Stats
     /** Regulars: at least 4 passages (3 intervals) in the period. */
     public const REGULAR_MIN_GAPS = 3;
 
+    /** Page sizes of the Top vessels and Regulars cards (1.1.2). */
+    public const PAGE_SIZES = [10, 20, 50, 100];
+    private const MAX_PAGE = 10000;
+
+    public static function pageSize(mixed $v): int
+    {
+        return in_array((int) $v, self::PAGE_SIZES, true) ? (int) $v : self::PAGE_SIZES[0];
+    }
+
+    /**
+     * One page of a ranking. The query selects `COUNT(*) OVER () AS _total` (rows before LIMIT) and has no LIMIT.
+     * A page past the end (the ranking shrank since the page was shown) gives the last page instead.
+     * @param array<int, mixed> $params
+     * @return array{rows: array<int, array<string, mixed>>, total: int, page: int, limit: int}
+     */
+    public static function paged(string $sql, array $params, int $limit, int $page): array
+    {
+        $limit = self::pageSize($limit);
+        $page = max(0, min(self::MAX_PAGE, $page));
+        $rows = Db::all($sql . ' LIMIT ' . $limit . ' OFFSET ' . ($page * $limit), $params);
+        if ($rows === [] && $page > 0) {
+            $total = (int) (Db::all($sql . ' LIMIT 1', $params)[0]['_total'] ?? 0);
+            $page = $total > 0 ? intdiv($total - 1, $limit) : 0;
+            $rows = $total > 0 ? Db::all($sql . ' LIMIT ' . $limit . ' OFFSET ' . ($page * $limit), $params) : [];
+        }
+        $total = (int) ($rows[0]['_total'] ?? 0);
+        foreach ($rows as &$r) {
+            unset($r['_total']);
+        }
+        unset($r);
+        return ['rows' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit];
+    }
+
     /** SQL giving the band index (0, 1, 2; 3 = unknown) of a distance column. */
     public static function bandSql(string $col): string
     {
@@ -233,29 +266,40 @@ final class Stats
      */
     public static function regulars(int $sinceTs, int $limit = 10): array
     {
+        return self::regularsPage($sinceTs, $limit, 0)['rows'];
+    }
+
+    /**
+     * One page of the regulars, best first, with the number of regulars in the period.
+     * @return array{rows: array<int, array<string, mixed>>, total: int, page: int, limit: int}
+     */
+    public static function regularsPage(int $sinceTs, int $limit, int $page): array
+    {
         // Computed by the database (window function): light on memory even with a year of a busy coast.
         $ranked = [];
-        foreach (Db::all("SELECT * FROM (
+        $res = self::paged("SELECT y.*, COUNT(*) OVER () AS _total FROM (
                 SELECT mmsi, COUNT(*) AS gaps, AVG(g) AS avg_s, STDDEV_POP(g) AS sd_s, MIN(g) AS min_s, MAX(g) AS max_s
                 FROM (SELECT p.mmsi, CAST(p.start_ts AS SIGNED) - LAG(CAST(p.end_ts AS SIGNED)) OVER (PARTITION BY p.mmsi ORDER BY p.start_ts) AS g
                       FROM passage p JOIN vessel v ON v.mmsi = p.mmsi
                       WHERE p.start_ts >= ? AND v.vclass NOT IN ('BASE','ATON')) x
                 WHERE g > 0 GROUP BY mmsi HAVING gaps >= ?) y
-            ORDER BY sd_s / avg_s, gaps DESC, mmsi LIMIT " . max(1, $limit), [$sinceTs, self::REGULAR_MIN_GAPS]) as $r) {
+            ORDER BY sd_s / avg_s, gaps DESC, mmsi", [$sinceTs, self::REGULAR_MIN_GAPS], $limit, $page);
+        foreach ($res['rows'] as $r) {
             $avg = (int) round((float) $r['avg_s']);
             $ranked[] = ['mmsi' => (int) $r['mmsi'], 'passages' => (int) $r['gaps'] + 1, 'count' => (int) $r['gaps'],
                 'avg' => $avg, 'min' => (int) $r['min_s'], 'max' => (int) $r['max_s'], 'sd' => (int) round((float) $r['sd_s']),
                 'cv' => $avg > 0 ? (float) $r['sd_s'] / $avg : 0.0];
         }
         if ($ranked === []) {
-            return [];
+            return ['rows' => []] + $res;
         }
         $info = [];
         $in = implode(',', array_fill(0, count($ranked), '?'));
         foreach (Db::all("SELECT mmsi, name, country, shiptype, vclass, length_m FROM vessel WHERE mmsi IN ($in)", array_column($ranked, 'mmsi')) as $v) {
             $info[(int) $v['mmsi']] = $v;
         }
-        return array_map(static fn ($r) => array_merge($info[$r['mmsi']] ?? [], $r, ['cv' => round($r['cv'], 3)]), $ranked);
+        $res['rows'] = array_map(static fn ($r) => array_merge($info[$r['mmsi']] ?? [], $r, ['cv' => round($r['cv'], 3)]), $ranked);
+        return $res;
     }
 
     /**

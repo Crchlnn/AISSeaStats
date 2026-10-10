@@ -1,14 +1,23 @@
 #!/bin/sh
 # AISSeaStats installer (Docker). Run from the repository folder:
-#   ./install.sh
-# It creates .env with random passwords (once), builds the image and starts
-# the three containers (db, app, worker).
+#   ./install.sh           download the ready-made image (about 1 minute), or build it here if that fails
+#   ./install.sh --build   build the image on this machine (5 to 10 minutes on a Raspberry Pi)
+# It creates .env with random passwords (once) and starts the three containers (db, app, worker).
 set -eu
 
 cd "$(dirname "$0")"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+mode=pull
+for arg in "$@"; do
+  case "$arg" in
+    --build) mode=build ;;
+    -h|--help) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option: $arg (use --build to build the image here)" ;;
+  esac
+done
 
 command -v docker >/dev/null 2>&1 || die "Docker is not installed. See https://docs.docker.com/engine/install/debian/"
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is missing (docker compose ...). Install the docker-compose-plugin package."
@@ -59,10 +68,22 @@ else
   say "Keeping existing .env."
 fi
 
-say "Building and starting AISSeaStats."
-say "First install: about 5 to 10 minutes on a Raspberry Pi (compiling PHP extensions), 1 to 2 minutes on a PC."
-say "Later updates are much faster."
-docker compose up -d --build
+build_here() {
+  say "Building and starting AISSeaStats."
+  say "First build: about 5 to 10 minutes on a Raspberry Pi (compiling PHP extensions), 1 to 2 minutes on a PC."
+  docker compose up -d --build
+}
+if [ "$mode" = pull ]; then
+  say "Downloading the ready-made AISSeaStats image..."
+  if docker compose pull; then
+    docker compose up -d
+  else
+    say "Could not download the ready-made image (no access to ghcr.io?). Building it on this machine instead."
+    build_here
+  fi
+else
+  build_here
+fi
 
 say "Waiting for the application to be ready..."
 i=0

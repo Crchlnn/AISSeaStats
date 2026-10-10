@@ -7,7 +7,7 @@ AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it
 - **Vessels seen** per hour, day and month, split by distance (under 20 NM, 20–50 NM, beyond); click a bar to list them, each with its distance band
 - **Propagation days** flagged when the station hears much further than usual (tropospheric ducting), and the **furthest vessels**
 - **Top routes**, inferred from where each vessel enters and leaves your coverage, drawn on a map
-- **Top vessels** by passages, days seen, length, speed and distance
+- **Top vessels** by passages, days seen, length, speed and distance, 10 to 100 per page
 - **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
 - **Fleet** by type and flag, and **range by direction**, with the vessel and time of each record
 - **Regulars**: vessels that come back most regularly, and the time between passages on each vessel card
@@ -79,9 +79,11 @@ cd AISSeaStats
 ./install.sh
 ```
 
-**Allow 5 to 10 minutes on a Raspberry Pi** for the first install (about 6.5 minutes measured on a Pi 4), 1 to 2 minutes on a PC: the image compiles PHP extensions once. Updates are much faster.
+`install.sh` downloads the **ready-made image** (64-bit Raspberry Pi and PC, about a minute), creates `.env` with random database passwords and starts three containers: `db` (MariaDB 11), `app` (lighttpd + PHP-FPM) and `worker` (background jobs). If the image cannot be downloaded, it builds it on your machine instead.
 
-`install.sh` creates `.env` with random database passwords, builds the image and starts three containers: `db` (MariaDB 11), `app` (lighttpd + PHP-FPM) and `worker` (background jobs). Then open `http://<pi-address>:8095` and the setup wizard asks for:
+Prefer to build the image yourself? `./install.sh --build`. **Allow 5 to 10 minutes on a Raspberry Pi** (about 6.5 minutes measured on a Pi 4), 1 to 2 minutes on a PC: PHP extensions are compiled once. Both ways give the same result and can be switched at any time (see [Upgrade](#upgrade)).
+
+Then open `http://<pi-address>:8095` and the setup wizard asks for:
 
 1. the station name and antenna position (used for distances and range, never sent anywhere),
 2. the time zone and language,
@@ -89,7 +91,29 @@ cd AISSeaStats
 
 If AIS-catcher runs in managed mode, the wizard can pre-fill the name and position from its `config.json` (read in your browser, never uploaded). It then shows your **ingestion token** and how to fill AIS-catcher's HTTP output.
 
-Manual alternative: `cp .env.example .env`, edit the passwords, then `docker compose up -d --build`.
+**Without Git**, with the ready-made image only:
+
+```sh
+mkdir aisseastats && cd aisseastats
+curl -fsSLO https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/.env.example -o .env
+nano .env                  # set DB_PASSWORD and DB_ROOT_PASSWORD to long random values
+docker compose up -d
+```
+
+Manual alternative from the cloned folder: `cp .env.example .env`, edit the passwords, then `docker compose up -d` (ready-made image) or `docker compose up -d --build` (built here).
+
+### Ready-made image
+
+`ghcr.io/crchlnn/aisseastats`, for `linux/arm64` (Raspberry Pi 4/5 with a 64-bit OS) and `linux/amd64`, published automatically by GitHub Actions for each release:
+
+| Tag | Follows |
+| --- | --- |
+| `latest` | the latest release (default) |
+| `1.1` | bug fixes of 1.1 only (1.1.2, 1.1.3…) |
+| `1.1.2` | exactly this version |
+
+To pin a tag, set `AISSEASTATS_VERSION=1.1` (for example) in `.env`. Database changes are applied when the container starts, so an automatic updater (Watchtower or similar) that pulls a new image and restarts the `app` and `worker` containers keeps working with your data. Updates then install without you looking: keep a backup (see [Everyday commands](#everyday-commands)), or pin a tag to choose when to move on.
 
 ## Connect AIS-catcher
 
@@ -145,16 +169,26 @@ docker compose exec app php bin/reset-data.php --yes          # remove it before
 Your statistics are kept: they live in the Docker volume `aisseastats_db-data`, and your settings in the database and in `.env`, none of which Git or the upgrade touch. Database changes are applied automatically when the app starts.
 
 ```sh
-cd AISSeaStats                       # the folder you installed from
-git pull                             # get the new version
-docker compose up -d --build         # rebuild and restart (a few seconds to a minute)
+cd AISSeaStats                                    # the folder you installed from
+git pull                                          # get the new version (docs, docker-compose.yml)
+docker compose pull && docker compose up -d       # ready-made image: download and restart
 ```
+
+or, to build the image on your machine as before:
+
+```sh
+cd AISSeaStats
+git pull
+docker compose up -d --build                      # rebuild and restart
+```
+
+Both ways can be used on the same station, one update with one, the next with the other: they give the image the same name and use the same data. An installation made before 1.1.2 built an image named `aisseastats:local`; it is no longer used and can be removed with `docker image rm aisseastats:local`.
 
 Then reload the page (Ctrl+F5 / Cmd+Shift+R if the look did not change). Check the version at the bottom of the page and what changed in [Version history](#version-history).
 
 - **Backup first, if you want to be safe** (see the table below): an upgrade does not delete data, but a backup costs nothing.
 - **`git pull` refuses to run** ("your local changes would be overwritten"): you edited a tracked file. `git stash`, then `git pull`, then `git stash pop` if you want your change back; your data is not affected.
-- **Going back to a previous version**: `git checkout v1.0.0-beta.3` (for example), then `docker compose up -d --build`. Database changes are not rolled back, so prefer restoring a backup taken before the upgrade.
+- **Going back to a previous version**: set `AISSEASTATS_VERSION=1.1.1` (for example) in `.env` and run `docker compose pull && docker compose up -d`, or `git checkout v1.1.1` then `docker compose up -d --build`. Database changes are not rolled back, so prefer restoring a backup taken before the upgrade.
 - Only `docker compose down -v` deletes the data (the `-v` removes the volume).
 
 ## Version history
@@ -163,6 +197,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.1.2 | 2026-10-10 | Ready-made image documented and used by default (`docker compose pull`), building it yourself still possible; Top vessels and Regulars: 10, 20, 50 or 100 per page with pages; vessel list of a chart bar: sort by distance and filter by distance band |
 | 1.1.1 | 2026-10-10 | Vessel list of a chart bar: a coloured square for each vessel's distance band, its distance and the totals per band; range chart tooltip: vessel, date and time of each record; time of the record in the furthest vessels list |
 | 1.1.0 | 2026-10-10 | Vessel chart split by distance band; exceptional propagation days and furthest vessels; Regulars and time between passages; busiest hours (weekday × hour); station reception strip |
 | 1.0.0-beta.8 | 2026-10-06 | Debug capture also written to a dated JSON Lines file (contributed by @Phil353556); aiscatcher.org link on the vessel card instead of MarineTraffic, whose links no longer work |
@@ -178,7 +213,8 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Task | Command |
 | --- | --- |
-| Upgrade | `git pull && docker compose up -d --build` |
+| Upgrade (ready-made image) | `git pull && docker compose pull && docker compose up -d` |
+| Upgrade (build here) | `git pull && docker compose up -d --build` |
 | Logs | `docker compose logs -f app worker` |
 | Status | `docker compose ps` |
 | Lost admin password | `docker compose exec app php bin/reset-admin.php` |
@@ -190,7 +226,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 ## Reading the statistics
 
 - **Distance bands.** Each vessel is counted once per hour, day or month, in the band of its furthest position: under 20 NM, 20–50 NM, 50 NM and beyond, or *distance unknown* (no position received, or hours recorded before 1.1.0).
-- **Vessel list of a bar.** Clicking a bar lists its vessels with a coloured square for their band (same colours as the chart) and their furthest distance; the totals per band at the top count the whole bar, even when the list stops at 300 vessels.
+- **Vessel list of a bar.** Clicking a bar lists its vessels with a coloured square for their band (same colours as the chart) and their furthest distance; the totals per band at the top count the whole bar, even when the list stops at 300 vessels. Sort by messages (by name for an hour) or by distance; click a band to list only its vessels, click it again to see them all.
 - **Range records.** Hovering the range chart shows, for each 10° sector, the vessel that set the record and when. Records set before 1.1.1 get their time from the sampled positions when these are still kept (30 days); older ones show their day only.
 - **Exceptional propagation.** A day is flagged (orange triangle above the bar) when its range is at least twice the usual range (median of the 30 previous days), at least 20 NM more, and at least 3 vessels were heard beyond 1.5 × the usual range. Beyond the horizon, VHF reception depends on tropospheric ducting, which follows the weather: see the forecast on [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html).
 - **Regulars.** Time between passages is measured from the end of one passage to the start of the next (a passage ends after 2 hours without hearing the vessel). Vessels with at least 4 passages in the period are ranked by how steady that time is. A vessel moored at the edge of coverage, heard on and off, can count several short passages.

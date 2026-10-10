@@ -2,6 +2,21 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.2 — 2026-10-10
+
+Installation and updates
+- Ready-made image `ghcr.io/crchlnn/aisseastats` (arm64 and amd64), used by default: `install.sh` downloads it (about a minute) and builds the image on the machine only if the download fails; `./install.sh --build` always builds it. Updating: `docker compose pull && docker compose up -d`, or `docker compose up -d --build` as before; both can be mixed on the same station
+- `AISSEASTATS_VERSION` in `.env` pins an image tag (`1.1`, `1.1.2`…); empty means the latest release
+- Installation without Git documented (`docker-compose.yml` and `.env` only), and automatic updaters such as Watchtower
+- Release workflow: checks that the tag matches the version, `latest` only for final releases (not betas), `edge` for a manual run on main, no build attestation listed as an "unknown" platform
+
+Improvements
+- Top vessels and Regulars: 10, 20, 50 or 100 per page (remembered), with previous / next pages; the page goes back to 1 when the period or the ranking changes
+- Vessel list of a chart bar: sort by messages (by name for an hour) or by distance; click a distance band to list only its vessels (up to 300 per band), click again to list them all
+- In that list, distances are rounded down so that a vessel at 19.96 NM reads 19.9 NM next to its "< 20 NM" square
+
+No database migration.
+
 ## 1.1.1 — 2026-10-10
 
 Improvements

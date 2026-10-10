@@ -49,11 +49,23 @@ cd AISSeaStats
 ./install.sh
 ```
 
-**Comptez 5 à 10 minutes sur un Raspberry Pi** pour la première installation (6 min 30 mesurées sur un Pi 4), 1 à 2 minutes sur un PC : l'image compile une fois les extensions PHP. Les mises à jour sont beaucoup plus rapides.
+Le script télécharge l'**image toute prête** (Raspberry Pi 64 bits et PC, environ une minute), crée `.env` avec des mots de passe aléatoires et démarre trois conteneurs : `db`, `app` et `worker`. Si l'image ne peut pas être téléchargée, il la construit sur la machine.
 
-Le script crée `.env` avec des mots de passe aléatoires, construit l'image et démarre trois conteneurs : `db`, `app` et `worker`.
+Vous préférez construire l'image vous-même ? `./install.sh --build`. **Comptez alors 5 à 10 minutes sur un Raspberry Pi** (6 min 30 mesurées sur un Pi 4), 1 à 2 minutes sur un PC : les extensions PHP sont compilées une fois. Les deux façons donnent le même résultat et peuvent être échangées à tout moment (voir [Mettre à jour](#mettre-à-jour)).
 
 Ouvrez ensuite `http://<ip-du-pi>:8095`. L'assistant demande le nom et la position de la station, le fuseau, la langue et un mot de passe d'administration, puis affiche le **jeton** et la ligne à ajouter à AIS-catcher. Faites-le tout de suite après l'installation : tant qu'il n'est pas terminé, n'importe qui sur le réseau local peut le faire.
+
+**Sans Git**, avec la seule image toute prête :
+
+```sh
+mkdir aisseastats && cd aisseastats
+curl -fsSLO https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/.env.example -o .env
+nano .env                  # mettez de longues valeurs aléatoires dans DB_PASSWORD et DB_ROOT_PASSWORD
+docker compose up -d
+```
+
+**Image toute prête** : `ghcr.io/crchlnn/aisseastats`, pour `linux/arm64` (Raspberry Pi 4/5 sous système 64 bits) et `linux/amd64`, publiée automatiquement par GitHub Actions à chaque version. Étiquettes : `latest` (dernière version, par défaut), `1.1` (corrections de la 1.1 seulement), `1.1.2` (exactement cette version) ; pour en fixer une, mettez par exemple `AISSEASTATS_VERSION=1.1` dans `.env`. Les évolutions de la base s'appliquent au démarrage du conteneur : un outil de mise à jour automatique (Watchtower ou équivalent) qui télécharge la nouvelle image et redémarre `app` et `worker` fonctionne avec vos données. Les mises à jour s'installent alors sans vous : gardez une sauvegarde, ou fixez une étiquette pour choisir le moment.
 
 ## Brancher AIS-catcher
 
@@ -104,16 +116,26 @@ Les premiers chiffres arrivent dans la minute. Les routes apparaissent quand un 
 Vos statistiques sont conservées : elles sont dans le volume Docker `aisseastats_db-data`, et vos réglages dans la base et dans `.env`, que ni Git ni la mise à jour ne touchent. Les évolutions de la base s'appliquent automatiquement au démarrage.
 
 ```sh
-cd AISSeaStats                       # le dossier d'installation
-git pull                             # récupère la nouvelle version
-docker compose up -d --build         # reconstruit et redémarre (quelques secondes à une minute)
+cd AISSeaStats                                    # le dossier d'installation
+git pull                                          # récupère la nouvelle version (doc, docker-compose.yml)
+docker compose pull && docker compose up -d       # image toute prête : téléchargement et redémarrage
 ```
+
+ou, pour construire l'image sur votre machine comme avant :
+
+```sh
+cd AISSeaStats
+git pull
+docker compose up -d --build                      # reconstruit et redémarre
+```
+
+Les deux façons s'utilisent sur la même station, une mise à jour avec l'une, la suivante avec l'autre : elles donnent le même nom à l'image et utilisent les mêmes données. Une installation antérieure à la 1.1.2 construisait une image nommée `aisseastats:local` ; elle ne sert plus et peut être supprimée avec `docker image rm aisseastats:local`.
 
 Rechargez ensuite la page (Ctrl+F5 / Cmd+Maj+R si l'affichage n'a pas changé). La version figure en bas de page, les nouveautés dans l'[historique des versions](#historique-des-versions).
 
 - **Par prudence, faites une sauvegarde avant** (commande ci-dessous) : la mise à jour ne supprime rien, mais une sauvegarde ne coûte rien.
 - **`git pull` refuse** (« your local changes would be overwritten ») : vous avez modifié un fichier suivi. `git stash`, puis `git pull`, puis `git stash pop` pour récupérer votre modification ; vos données ne sont pas concernées.
-- **Revenir à une version précédente** : `git checkout v1.0.0-beta.3` (par exemple), puis `docker compose up -d --build`. Les évolutions de la base ne sont pas annulées : préférez restaurer une sauvegarde faite avant la mise à jour.
+- **Revenir à une version précédente** : mettez `AISSEASTATS_VERSION=1.1.1` (par exemple) dans `.env` puis `docker compose pull && docker compose up -d`, ou `git checkout v1.1.1` puis `docker compose up -d --build`. Les évolutions de la base ne sont pas annulées : préférez restaurer une sauvegarde faite avant la mise à jour.
 - Seul `docker compose down -v` efface les données (le `-v` supprime le volume).
 
 ## Historique des versions
@@ -122,6 +144,7 @@ La plus récente en premier. Détail, corrections et évolutions de la base pour
 
 | Version | Date | Nouveautés |
 |---|---|---|
+| 1.1.2 | 10/10/2026 | Image toute prête documentée et utilisée par défaut (`docker compose pull`), construction locale toujours possible ; top navires et habitués : 10, 20, 50 ou 100 par page, avec pages ; liste des navires d'une barre : tri par distance et filtre par tranche de distance |
 | 1.1.1 | 10/10/2026 | Liste des navires d'une barre du graphique : carré de couleur de la tranche de distance de chaque navire, sa distance et les totaux par tranche ; infobulle du graphique de portée : navire, date et heure de chaque record ; heure du record dans les navires les plus lointains |
 | 1.1.0 | 10/10/2026 | Graphique des navires par tranche de distance ; jours de propagation exceptionnelle et navires les plus lointains ; habitués et temps entre deux passages ; heures d'affluence (jour × heure) ; réception de la station heure par heure |
 | 1.0.0-beta.8 | 06/10/2026 | Capture de débogage aussi écrite dans un fichier JSON Lines daté (contribution de @Phil353556) ; lien aiscatcher.org sur la fiche navire à la place de MarineTraffic, dont les liens ne fonctionnent plus |
@@ -144,7 +167,8 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 
 | Action | Commande |
 | --- | --- |
-| Mettre à jour | `git pull && docker compose up -d --build` |
+| Mettre à jour (image toute prête) | `git pull && docker compose pull && docker compose up -d` |
+| Mettre à jour (construite ici) | `git pull && docker compose up -d --build` |
 | Sauvegarder | `docker compose exec db sh -c 'mariadb-dump -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats' \| gzip > aisseastats.sql.gz` |
 | Restaurer | `gunzip -c aisseastats.sql.gz \| docker compose exec -T db sh -c 'mariadb -u root -p"$MARIADB_ROOT_PASSWORD" aisseastats'` |
 | Journaux | `docker compose logs -f app worker` |
@@ -162,7 +186,7 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 - **Photos** : dans l'ordre, votre propre photo (admin → Photos de navires, ou lien « Ajouter une photo » sur la fiche quand vous êtes connecté), puis une photo libre de Wikimedia Commons ou Wikidata (par IMO ou MMSI). Beaucoup de bateaux de pêche et de plaisance n'ont aucune photo libre : ajoutez la vôtre. VesselFinder, ShipSpotting et aiscatcher.org sont proposés en liens : leurs conditions n'autorisent pas la récupération automatique de leurs photos.
 - **Alertes** (page admin) : AIS-catcher ne prévient pas quand la réception s'arrête ; AISSeaStats envoie un message après N minutes sans rien recevoir (30 par défaut), puis un autre quand la réception revient. Canaux, au choix et cumulables : **ntfy** (application sur téléphone, serveur public ntfy.sh ou le vôtre, avec un nom de sujet difficile à deviner), **Telegram** (bot créé avec @BotFather), **webhook** (JSON lisible par Discord, Slack, Gotify, Home Assistant…) et **e-mail** (serveur SMTP de votre messagerie). Le bouton « Envoyer un test » vérifie chaque canal. Ces alertes partent du Pi : s'il est éteint ou sans réseau, seule une URL **heartbeat** (healthchecks.io, Uptime Kuma en mode Push…) permet d'être prévenu.
 - **Lire les statistiques (1.1.0)** : chaque navire compte une fois par heure, jour ou mois, dans la tranche de sa position la plus lointaine (moins de 20 NM, 20 à 50 NM, au-delà, ou distance inconnue). Un jour est signalé en **propagation exceptionnelle** (triangle orange) quand sa portée vaut au moins deux fois la portée habituelle (médiane des 30 jours précédents), avec 20 NM de plus et au moins 3 navires entendus au-delà de 1,5 fois cette portée ; prévisions sur [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html). Les **habitués** sont classés selon la régularité du temps entre deux passages (de la fin de l'un au début du suivant, 4 passages au moins). Les **heures d'affluence** ne comptent que les heures avec des messages. Dans la **réception de la station**, une case rouge signifie « aucun message » : panne, ou simplement pas de trafic sur une zone calme.
-- **Liste d'une barre et records (1.1.1)** : un clic sur une barre liste ses navires avec un carré de la couleur de leur tranche et leur distance maximale ; les totaux par tranche, en haut, comptent toute la barre même si la liste s'arrête à 300 navires. Au survol du graphique de portée, chaque secteur de 10° indique le navire du record, sa date et son heure. Les records antérieurs à la 1.1.1 retrouvent leur heure grâce aux positions encore conservées (30 jours) ; les plus anciens n'affichent que leur jour.
+- **Liste d'une barre et records (1.1.1)** : un clic sur une barre liste ses navires avec un carré de la couleur de leur tranche et leur distance maximale ; les totaux par tranche, en haut, comptent toute la barre même si la liste s'arrête à 300 navires. Tri par messages (par nom pour une heure) ou par distance ; un clic sur une tranche ne liste que ses navires, un second clic les montre tous. Au survol du graphique de portée, chaque secteur de 10° indique le navire du record, sa date et son heure. Les records antérieurs à la 1.1.1 retrouvent leur heure grâce aux positions encore conservées (30 jours) ; les plus anciens n'affichent que leur jour.
 - **Navire sans nom** : le nom n'arrive que dans le message d'identité (AIS type 5, ou 24 en classe B), envoyé toutes les 6 minutes et plus long qu'une position, donc le premier perdu en limite de portée. Dans l'admin, **Débogage : messages reçus** enregistre ce qu'AIS-catcher envoie pour ce MMSI et montre quels types de messages arrivent.
 - **Taille de la base** : l'admin affiche la taille des statistiques (quelques Mo). Le dossier de MariaDB dépasse 100 Mo dès l'installation, car il contient des fichiers de taille fixe, surtout le journal de transactions de 96 Mo. C'est normal, seules les données grandissent.
 - **Carte « Access blocked »** ou **graphique vide après changement de période** : corrigés en 1.0.0-beta.4, mettez à jour puis rechargez la page.

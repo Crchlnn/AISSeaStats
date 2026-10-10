@@ -200,6 +200,23 @@ main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 8px; display: grid;
 .band-legend { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--text-2); }
 .band-legend li { display: inline-flex; align-items: center; white-space: nowrap; }
 .band-legend strong { color: var(--text); font-weight: 600; margin-left: 4px; font-variant-numeric: tabular-nums; }
+/* Paging of the Top vessels and Regulars cards (1.1.2). */
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.pager[hidden] { display: none; }
+.pager-nav { display: inline-flex; align-items: center; gap: 4px; }
+.pager-nav .icon-btn { width: 32px; height: 32px; font-size: 18px; line-height: 1; }
+.pager-nav .icon-btn:disabled { opacity: .35; cursor: default; }
+.pager-pos { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; min-width: 9ch; text-align: center; }
+/* Bar vessel list: band filters and sort (1.1.2). */
+.ld-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 8px; }
+.ld-tools .band-legend { margin: 0; gap: 4px 6px; }
+.band-filter { display: inline-flex; align-items: center; font: inherit; color: inherit; background: transparent;
+  border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.band-filter:hover { background: var(--surface-2); }
+.band-filter:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+.band-filter.on { background: var(--surface-2); border-color: var(--grid); }
+.band-filter.off { opacity: .45; }
+#ld-body.is-loading table, #ld-body.is-loading .band-legend { opacity: .5; transition: opacity .15s; }
 
 /* Remarkable */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -300,6 +317,11 @@ pre.cmd {
 #updated { margin-left: auto; }
 @media (min-width: 861px) {
   .sticky-filter { position: sticky; top: 61px; }
+}
+/* A card scrolled into view (pager) stops below the sticky bars. */
+.card { scroll-margin-top: 72px; }
+@media (min-width: 861px) {
+  .card { scroll-margin-top: 124px; }
 }
 
 /* Clickable rows (routes, destinations) */

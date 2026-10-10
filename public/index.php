@@ -122,6 +122,7 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
         </div>
       </div>
       <table class="table" id="top-table"><tbody></tbody></table>
+      <div class="pager" id="top-pager" hidden></div>
     </section>
 
     <section class="card">
@@ -161,6 +162,7 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
         <span class="muted small"><?= $t('reg.hint') ?></span>
       </div>
       <table class="table" id="regulars-table"><tbody></tbody></table>
+      <div class="pager" id="regulars-pager" hidden></div>
     </section>
 
     <section class="card">

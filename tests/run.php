@@ -372,6 +372,15 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     $reg = Stats::regulars($t0 - 1);
     check('regulars ranked by regularity', count($reg) === 2 && $reg[0]['mmsi'] === 900000011 && $reg[0]['avg'] === 32400
         && $reg[0]['sd'] === 0 && $reg[0]['passages'] === 5 && $reg[0]['name'] === 'REGULAR' && $reg[1]['mmsi'] === 900000012);
+    // 1.1.2: regulars by page; a page past the end gives the last page.
+    $rp = Stats::regularsPage($t0 - 1, 10, 0);
+    check('regulars page', $rp['total'] === 2 && $rp['page'] === 0 && $rp['limit'] === 10 && count($rp['rows']) === 2
+        && $rp['rows'][0]['mmsi'] === 900000011 && !isset($rp['rows'][0]['_total']));
+    $rp = Stats::regularsPage($t0 - 1, 10, 5);
+    check('regulars page past the end', $rp['page'] === 0 && count($rp['rows']) === 2);
+    check('page sizes', Stats::pageSize(50) === 50 && Stats::pageSize('100') === 100 && Stats::pageSize(7) === 10 && Stats::pageSize(null) === 10);
+    $pg = Stats::paged('SELECT mmsi, COUNT(*) OVER () AS _total FROM vessel WHERE mmsi BETWEEN 900000011 AND 900000013 ORDER BY mmsi', [], 10, 0);
+    check('paged query', $pg['total'] === 3 && count($pg['rows']) === 3 && array_keys($pg['rows'][0]) === ['mmsi']);
     $g = Stats::vesselGaps(900000011);
     check('vessel gaps', $g !== null && $g['count'] === 4 && $g['avg'] === 32400 && $g['min'] === 32400 && $g['max'] === 32400);
     check('gaps of a single passage', Stats::gapStats(Stats::gapsOf([['start_ts' => 1, 'end_ts' => 2]])) === null);

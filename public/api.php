@@ -59,7 +59,7 @@ try {
         case 'routes':
             Web::json(routes($sinceTs), 200, 60);
         case 'top':
-            Web::json(top((string) ($_GET['by'] ?? 'passages'), $sinceDay, $sinceTs), 200, 60);
+            Web::json(top((string) ($_GET['by'] ?? 'passages'), $sinceDay, $sinceTs, (int) ($_GET['limit'] ?? 10), (int) ($_GET['page'] ?? 0)), 200, 60);
         case 'remarkable':
             Web::json(remarkable(), 200, 30);
         case 'fleet':
@@ -68,7 +68,8 @@ try {
             Web::json(polar($sinceDay, $tz), 200, 60);
         case 'regulars':
             // At most a year: regular patterns older than that say little about today's traffic.
-            Web::json(['rows' => Stats::regulars(max($sinceTs, $today->modify('-365 days')->getTimestamp()))], 200, 300);
+            Web::json(Stats::regularsPage(max($sinceTs, $today->modify('-365 days')->getTimestamp()),
+                (int) ($_GET['limit'] ?? 10), (int) ($_GET['page'] ?? 0)), 200, 300);
         case 'heatmap':
             // At least a week, so that every weekday is present.
             $hmDays = max(7, $days);
@@ -215,23 +216,25 @@ function routes(int $sinceTs): array
 }
 
 /** @return array<string, mixed> */
-function top(string $by, DateTimeImmutable $sinceDay, int $sinceTs): array
+function top(string $by, DateTimeImmutable $sinceDay, int $sinceTs, int $limit = 10, int $page = 0): array
 {
-    $cols = 'v.mmsi, v.name, v.shiptype, v.country, v.length_m, v.tags, v.vclass';
+    // One page of the ranking (10, 20, 50 or 100 rows); ties are ordered by MMSI so that pages never overlap.
+    $cols = 'v.mmsi, v.name, v.shiptype, v.country, v.length_m, v.tags, v.vclass, COUNT(*) OVER () AS _total';
     $sql = match ($by) {
         'days' => "SELECT {$cols}, COUNT(*) AS value FROM vessel_daily d JOIN vessel v ON v.mmsi = d.mmsi
-                   WHERE d.day >= ? GROUP BY d.mmsi ORDER BY value DESC, v.last_seen DESC LIMIT 15",
+                   WHERE d.day >= ? GROUP BY d.mmsi ORDER BY value DESC, v.last_seen DESC, v.mmsi",
         'length' => "SELECT {$cols}, v.length_m AS value FROM vessel v WHERE v.last_seen >= ? AND v.length_m IS NOT NULL
-                   AND v.vclass NOT IN " . INFRA . ' ORDER BY value DESC LIMIT 15',
+                   AND v.vclass NOT IN " . INFRA . ' ORDER BY value DESC, v.mmsi',
         'speed' => "SELECT {$cols}, v.max_speed_kn AS value FROM vessel v WHERE v.last_seen >= ? AND v.max_speed_kn IS NOT NULL
-                   ORDER BY value DESC LIMIT 15",
+                   ORDER BY value DESC, v.mmsi",
         'distance' => "SELECT {$cols}, v.max_dist_nm AS value FROM vessel v WHERE v.last_seen >= ? AND v.max_dist_nm IS NOT NULL
-                   AND v.vclass NOT IN " . INFRA . ' ORDER BY value DESC LIMIT 15',
+                   AND v.vclass NOT IN " . INFRA . ' ORDER BY value DESC, v.mmsi',
         default => "SELECT {$cols}, COUNT(*) AS value FROM passage p JOIN vessel v ON v.mmsi = p.mmsi
-                   WHERE p.start_ts >= ? GROUP BY p.mmsi ORDER BY value DESC, v.last_seen DESC LIMIT 15",
+                   WHERE p.start_ts >= ? GROUP BY p.mmsi ORDER BY value DESC, v.last_seen DESC, v.mmsi",
     };
     $param = $by === 'days' ? $sinceDay->format('Y-m-d') : $sinceTs;
-    return ['by' => in_array($by, ['days', 'length', 'speed', 'distance'], true) ? $by : 'passages', 'rows' => Db::all($sql, [$param])];
+    return ['by' => in_array($by, ['days', 'length', 'speed', 'distance'], true) ? $by : 'passages']
+        + Stats::paged($sql, [$param], $limit, $page);
 }
 
 /** @return array<string, mixed> */
@@ -363,6 +366,9 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
 {
     $cols = 'v.mmsi, v.name, v.shiptype, v.vclass, v.country, v.length_m, v.tags, v.last_seen';
     $bands = null; // set for a bar of the vessel chart
+    // A bar of the vessel chart can be sorted by distance and limited to one distance band (1.1.2).
+    $sort = ($_GET['sort'] ?? '') === 'dist' ? 'dist' : 'default';
+    $band = isset($_GET['band']) && preg_match('/^[0-3]$/', (string) $_GET['band']) ? (int) $_GET['band'] : null;
     switch ($by) {
         case 'type':
             $cat = (string) ($_GET['value'] ?? '');
@@ -405,8 +411,10 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
             if ($h <= 0 || $h % 3600 !== 0) {
                 Web::json(['error' => 'bad hour'], 400);
             }
+            $where = $band !== null ? ' AND ' . Stats::bandSql('h.max_dist_nm') . ' = ' . $band : '';
+            $order = $sort === 'dist' ? 'h.max_dist_nm DESC, v.mmsi' : 'v.name IS NULL, v.name, v.mmsi';
             $rows = Db::all("SELECT {$cols}, h.max_dist_nm AS dist FROM vessel_hourly h JOIN vessel v ON v.mmsi = h.mmsi
-                WHERE h.hour_ts = ? ORDER BY v.name IS NULL, v.name, v.mmsi LIMIT 300", [$h]);
+                WHERE h.hour_ts = ?{$where} ORDER BY {$order} LIMIT 300", [$h]);
             $bands = Db::all('SELECT ' . Stats::bandSql('max_dist_nm') . ' AS b, COUNT(*) AS n FROM vessel_hourly WHERE hour_ts = ? GROUP BY b', [$h]);
             break;
         case 'day':
@@ -418,8 +426,11 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
             }
             $first = $by === 'day' ? $value : $value . '-01';
             $last = $by === 'day' ? $value : date('Y-m-t', (int) strtotime($first . ' 00:00:00 UTC'));
+            $having = $band !== null ? ' HAVING ' . Stats::bandSql('dist') . ' = ' . $band : '';
+            // Descending order puts unknown distances (NULL) last.
+            $order = $sort === 'dist' ? 'dist DESC, msgs DESC, v.mmsi' : 'msgs DESC, v.mmsi';
             $rows = Db::all("SELECT {$cols}, SUM(d.msgs) AS msgs, MAX(d.max_dist_nm) AS dist FROM vessel_daily d JOIN vessel v ON v.mmsi = d.mmsi
-                WHERE d.day BETWEEN ? AND ? GROUP BY d.mmsi ORDER BY msgs DESC, v.mmsi LIMIT 300", [$first, $last]);
+                WHERE d.day BETWEEN ? AND ? GROUP BY d.mmsi{$having} ORDER BY {$order} LIMIT 300", [$first, $last]);
             $bands = Db::all('SELECT ' . Stats::bandSql('d') . ' AS b, COUNT(*) AS n FROM (
                 SELECT mmsi, MAX(max_dist_nm) AS d FROM vessel_daily WHERE day BETWEEN ? AND ? GROUP BY mmsi) x GROUP BY b', [$first, $last]);
             break;
@@ -441,6 +452,8 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
         unset($r);
         $out['bands'] = $totals;
         $out['limits'] = Stats::BAND_LIMITS;
+        $out['sort'] = $sort;
+        $out['band'] = $band;
     }
     return $out;
 }

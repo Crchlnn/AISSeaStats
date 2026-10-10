@@ -1,5 +1,10 @@
-# AISSeaStats — docker compose up -d --build
+# AISSeaStats
 # Settings come from .env (copy .env.example, or let install.sh generate it).
+#
+# Two ways to install and update, both supported (the data is the same either way):
+#   ready-made image:   docker compose pull && docker compose up -d
+#   build it yourself:  docker compose up -d --build
+# Both give the image the same name; the last command used wins.
 
 services:
   db:
@@ -31,7 +36,9 @@ services:
 
   app:
     build: .
-    image: aisseastats:local
+    # Ready-made image for arm64 (64-bit Raspberry Pi) and amd64, published for each release.
+    # AISSEASTATS_VERSION in .env pins a version (1.1 = bug fixes of 1.1 only); default: latest release.
+    image: ghcr.io/crchlnn/aisseastats:${AISSEASTATS_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       db:
@@ -52,7 +59,7 @@ services:
 
   worker:
     build: .
-    image: aisseastats:local
+    image: ghcr.io/crchlnn/aisseastats:${AISSEASTATS_VERSION:-latest}
     restart: unless-stopped
     command: ["worker"]
     depends_on:

@@ -1,38 +1,80 @@
 name: Release image
 
-# Publishes ghcr.io/<owner>/aisseastats when a version tag (v1.0.0 …) is pushed.
+# Publishes the ready-made image on GitHub Container Registry for 64-bit Raspberry Pi (arm64) and PC (amd64)
+# when a version tag is pushed (git tag v1.1.2 && git push --tags):
+#   ghcr.io/<owner>/aisseastats:1.1.2, :1.1 and :latest
+# A pre-release tag (v1.2.0-beta.1) only gets its exact version. A manual run on main publishes :edge, for testing.
+
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: release-image-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   image:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+
+      - name: Check that the tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(sed -n "s/^const VERSION = '\(.*\)';/\1/p" src/bootstrap.php)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION '$v' in src/bootstrap.php"
+            exit 1
+          fi
+
+      - name: Image name (registry names are lower case)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/aisseastats" >> "$GITHUB_ENV"
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/aisseastats
+          images: ${{ env.IMAGE }}
+          flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-      - uses: docker/build-push-action@v6
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=AISSeaStats
+            org.opencontainers.image.description=Long-term statistics for an AIS-catcher station
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

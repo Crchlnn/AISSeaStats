@@ -13,14 +13,20 @@
     'all': { days: 3650, period: 'month', months: 0 }
   };
   var VIEW_KEY = 'aisseastats-view';
-  var state = { range: '30', topBy: 'passages', charts: {}, maps: {}, fitRange: null };
+  // Rows per page of the Top vessels and Regulars cards are remembered; the page itself goes back to 1 on change.
+  var PAGE_SIZES = [10, 20, 50, 100];
+  var state = { range: '30', topBy: 'passages', topLimit: 10, regLimit: 10, topPage: 0, regPage: 0, charts: {}, maps: {}, fitRange: null };
   try {
     var saved = JSON.parse(localStorage.getItem(VIEW_KEY) || '{}');
     if (saved && RANGES[saved.range]) { state.range = saved.range; }
     if (saved && /^(passages|days|length|speed|distance)$/.test(saved.topBy || '')) { state.topBy = saved.topBy; }
+    if (saved && PAGE_SIZES.indexOf(saved.topLimit) >= 0) { state.topLimit = saved.topLimit; }
+    if (saved && PAGE_SIZES.indexOf(saved.regLimit) >= 0) { state.regLimit = saved.regLimit; }
   } catch (e) { /* storage unavailable: defaults */ }
   function saveView() {
-    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ range: state.range, topBy: state.topBy })); } catch (e) { /* ignore */ }
+    try {
+      localStorage.setItem(VIEW_KEY, JSON.stringify({ range: state.range, topBy: state.topBy, topLimit: state.topLimit, regLimit: state.regLimit }));
+    } catch (e) { /* ignore */ }
   }
   function range() { return RANGES[state.range]; }
   var NB = '\u00a0'; // keeps "12 NM", "2 h" on one line
@@ -471,13 +477,48 @@
     }).join('') : '<li class="empty">' + esc(t('routes.no_dest')) + '</li>';
   }
 
+  // ---------- Paging (Top vessels, Regulars) ----------
+  // Rows per page and previous / next; hidden while everything fits on the smallest page.
+  function renderPager(id, data, go) {
+    var el = $(id);
+    var total = data.total || 0, limit = data.limit || PAGE_SIZES[0], page = data.page || 0;
+    if (total <= PAGE_SIZES[0]) { el.hidden = true; el.innerHTML = ''; return; }
+    var last = Math.max(0, Math.ceil(total / limit) - 1);
+    var a = page * limit + 1, b = Math.min(total, (page + 1) * limit);
+    el.hidden = false;
+    el.innerHTML = '<div class="seg small" role="group" aria-label="' + esc(t('pager.per_page')) + '">' + PAGE_SIZES.map(function (n) {
+      return '<button type="button" data-size="' + n + '" class="' + (n === limit ? 'on' : '') + '" aria-pressed="' + (n === limit) + '">' + n + '</button>';
+    }).join('') + '</div>' +
+      '<div class="pager-nav"><button type="button" class="icon-btn" data-page="' + (page - 1) + '"' + (page <= 0 ? ' disabled' : '') +
+      ' aria-label="' + esc(t('pager.prev')) + '">‹</button>' +
+      '<span class="pager-pos">' + esc(t('pager.range', { a: num(a), b: num(b), n: num(total) })) + '</span>' +
+      '<button type="button" class="icon-btn" data-page="' + (page + 1) + '"' + (page >= last ? ' disabled' : '') +
+      ' aria-label="' + esc(t('pager.next')) + '">›</button></div>';
+    el.onclick = function (e) {
+      var btn = e.target.closest('button');
+      if (!btn || btn.disabled) { return; }
+      // From the bottom of a long page, bring the card's title back on screen so the new page starts in view.
+      var card = el.closest('.card');
+      if (card && card.getBoundingClientRect().top < parseFloat(getComputedStyle(card).scrollMarginTop || '0')) { card.scrollIntoView({ block: 'start' }); }
+      if (btn.hasAttribute('data-size')) {
+        var n = Number(btn.getAttribute('data-size'));
+        if (n !== limit) { go(Math.floor(page * limit / n), n); } // keep the first row shown on screen
+      } else {
+        go(Math.max(0, Math.min(last, Number(btn.getAttribute('data-page')))), limit);
+      }
+    };
+  }
+
   // ---------- Top vessels ----------
   function renderTop(data) {
     var tbody = $('top-table').querySelector('tbody');
+    state.topPage = data.page || 0;
+    renderPager('top-pager', data, function (page, limit) { state.topPage = page; state.topLimit = limit; saveView(); loadTop(); });
     if (!data.rows.length) {
       tbody.innerHTML = '<tr><td class="empty">' + esc(t('top.empty')) + '</td></tr>';
       return;
     }
+    var first = (data.page || 0) * (data.limit || 0);
     tbody.innerHTML = data.rows.map(function (v, i) {
       var val;
       switch (data.by) {
@@ -487,7 +528,7 @@
         case 'distance': val = nm(v.value); break;
         default: val = t('top.passages_n', { n: num(v.value) });
       }
-      return '<tr><td class="rank-n">' + (i + 1) + '</td><td>' + '<span class="flag" title="' + esc(v.country || '') + '">' +
+      return '<tr><td class="rank-n">' + (first + i + 1) + '</td><td>' + '<span class="flag" title="' + esc(v.country || '') + '">' +
         flag(v.country) + '</span>' + vlink(v) + '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) +
         (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') + '</span></td><td class="r">' + esc(val) + '</td></tr>';
     }).join('');
@@ -623,12 +664,15 @@
   function renderRegulars(data) {
     var tbody = $('regulars-table').querySelector('tbody');
     var rows = data.rows || [];
+    state.regPage = data.page || 0;
+    renderPager('regulars-pager', data, function (page, limit) { state.regPage = page; state.regLimit = limit; saveView(); loadRegulars(); });
     if (!rows.length) {
       tbody.innerHTML = '<tr><td class="empty">' + esc(t('reg.empty')) + '</td></tr>';
       return;
     }
+    var first = (data.page || 0) * (data.limit || 0);
     tbody.innerHTML = rows.map(function (v, i) {
-      return '<tr><td class="rank-n">' + (i + 1) + '</td><td><span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' +
+      return '<tr><td class="rank-n">' + (first + i + 1) + '</td><td><span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' +
         vlink(v) + '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + ' · ' + esc(t('top.passages_n', { n: num(v.passages) })) + '</span></td>' +
         '<td class="r"><span class="reg-every">' + esc(t('reg.every', { d: dur(v.avg) })) + '</span>' +
         '<span class="type">' + esc(t('reg.spread', { d: dur(v.sd) })) + '</span></td></tr>';
@@ -851,39 +895,70 @@
   }
   // Lists for one bar of the vessel chart (an hour, a day or a month) carry their own time span.
   var TIME_LISTS = { hour: 1, day: 1, month: 1 };
-  function showList(params, title) {
+  var listReq = 0;
+  function showList(params, title, keep) {
     var dlg = $('list-dialog');
     var body = $('ld-body');
     var kind = params.by;
     var timed = TIME_LISTS[kind] === 1;
-    body.innerHTML = '<p class="muted">' + esc(t('status.loading')) + '</p>';
+    var req = ++listReq;
+    // Changing the sort or the band keeps the list on screen (dimmed) until the new one arrives.
+    if (keep) { body.classList.add('is-loading'); } else { body.innerHTML = '<p class="muted">' + esc(t('status.loading')) + '</p>'; }
     if (!dlg.open) { dlg.showModal(); }
     api('list', params).then(function (d) {
+      if (req !== listReq) { return; } // a newer request is on its way
+      body.classList.remove('is-loading');
       var rows = d.rows || [];
-      var head = '<div class="vd-head"><div><h2 id="ld-title">' + esc(title) + '</h2>' +
-        '<p class="muted small">' + esc(timed ? t('list.subtitle_bar', { n: num(rows.length) }) : t('list.subtitle', { n: num(rows.length), p: periodLabel() })) + '</p></div>' +
-        '<button type="button" class="icon-btn ld-close" aria-label="' + esc(t('vessel.close')) + '">✕</button></div>';
       // A bar of the vessel chart: a square per vessel for its distance band, and the totals per band.
       var bands = d.bands ? bandDefs(d.limits) : null;
+      var band = d.band != null ? d.band : null;
+      var sub = timed ? t('list.subtitle_bar', { n: num(rows.length) }) : t('list.subtitle', { n: num(rows.length), p: periodLabel() });
+      if (bands && band !== null) { sub += ' · ' + bands[band].label; }
+      var head = '<div class="vd-head"><div><h2 id="ld-title">' + esc(title) + '</h2>' +
+        '<p class="muted small">' + esc(sub) + '</p></div>' +
+        '<button type="button" class="icon-btn ld-close" aria-label="' + esc(t('vessel.close')) + '">✕</button></div>';
       var legend = '';
       if (bands) {
-        legend = '<ul class="band-legend" aria-label="' + esc(t('list.bands')) + '">' + bands.map(function (b, k) {
-          return k === 0 || d.bands[k] > 0
-            ? '<li>' + bandSquare(k, b.label) + '<span>' + esc(b.label) + '</span> <strong>' + esc(num(d.bands[k])) + '</strong></li>' : '';
-        }).join('') + '</ul>';
+        // Each band is a filter: click to show only that band, click again to show them all.
+        legend = '<div class="ld-tools"><ul class="band-legend" aria-label="' + esc(t('list.bands')) + '">' + bands.map(function (b, k) {
+          if (!(k === 0 || d.bands[k] > 0)) { return ''; }
+          var on = band === k;
+          return '<li><button type="button" class="band-filter' + (on ? ' on' : '') + (band !== null && !on ? ' off' : '') + '" data-band="' + k + '" aria-pressed="' + on + '"' +
+            ' title="' + esc(on ? t('list.band_all') : t('list.band_only')) + '">' + bandSquare(k, b.label) + '<span>' + esc(b.label) + '</span> <strong>' + esc(num(d.bands[k])) + '</strong></button></li>';
+        }).join('') + '</ul>' +
+          '<div class="seg small" role="group" aria-label="' + esc(t('list.sort')) + '">' +
+          '<button type="button" data-sort="default" class="' + (d.sort !== 'dist' ? 'on' : '') + '">' + esc(t(kind === 'hour' ? 'list.sort_name' : 'list.sort_msgs')) + '</button>' +
+          '<button type="button" data-sort="dist" class="' + (d.sort === 'dist' ? 'on' : '') + '">' + esc(t('list.sort_dist')) + '</button></div></div>';
       }
       var table = rows.length ? '<table class="table"><tbody>' + rows.map(function (v) {
         var right = kind === 'route' ? t('top.passages_n', { n: num(v.passages) })
           : (v.msgs != null ? t('counts.msgs_n', { n: num(v.msgs) }) : fmtDateTime.format(new Date(v.last_seen * 1000)));
         var sq = bands ? bandSquare(v.band, bands[v.band] ? bands[v.band].label : '') : '';
+        // Distance rounded down here, so that 19.96 NM reads 19.9 next to its "< 20 NM" square.
         return '<tr><td>' + sq + '<span class="flag" title="' + esc(v.country || '') + '">' + flag(v.country) + '</span>' + vlink(v) +
           '<span class="type">' + esc(typeLabel(v.shiptype, v.vclass)) + (v.length_m ? ' · ' + num(v.length_m) + NB + 'm' : '') +
-          (bands && v.dist != null ? ' · ' + nm(v.dist) : '') + '</span></td>' +
+          (bands && v.dist != null ? ' · ' + nm(Math.floor(v.dist * 10) / 10) : '') + '</span></td>' +
           '<td class="r">' + esc(right) + '</td></tr>';
       }).join('') + '</tbody></table>' : '<p class="empty">' + esc(t('top.empty')) + '</p>';
       body.innerHTML = head + legend + table + (d.truncated ? '<p class="muted small">' + esc(t('list.truncated')) + '</p>' : '');
       body.querySelector('.ld-close').addEventListener('click', function () { dlg.close(); });
+      if (bands) {
+        body.querySelector('.ld-tools').addEventListener('click', function (e) {
+          var b = e.target.closest('button');
+          if (!b) { return; }
+          var next = Object.assign({}, params);
+          if (b.hasAttribute('data-sort')) {
+            if (b.getAttribute('data-sort') === 'dist') { next.sort = 'dist'; } else { delete next.sort; }
+          } else {
+            var k = Number(b.getAttribute('data-band'));
+            if (band === k) { delete next.band; } else { next.band = k; }
+          }
+          showList(next, title, true);
+        });
+      }
     }).catch(function () {
+      if (req !== listReq) { return; }
+      body.classList.remove('is-loading');
       body.innerHTML = '<p>' + esc(t('error.load')) + '</p><button type="button" class="btn secondary ld-close">' + esc(t('vessel.close')) + '</button>';
       body.querySelector('.ld-close').addEventListener('click', function () { dlg.close(); });
     });
@@ -935,8 +1010,8 @@
   }
   markOn('range', 'data-range', state.range);
   markOn('top-by', 'data-by', state.topBy);
-  segment('range', 'data-range', function (v) { state.range = v; saveView(); loadCounts(); loadPeriodWidgets(); });
-  segment('top-by', 'data-by', function (v) { state.topBy = v; saveView(); loadTop(); });
+  segment('range', 'data-range', function (v) { state.range = v; state.topPage = 0; state.regPage = 0; saveView(); loadCounts(); loadPeriodWidgets(); });
+  segment('top-by', 'data-by', function (v) { state.topBy = v; state.topPage = 0; saveView(); loadTop(); });
 
   $('theme-toggle').addEventListener('click', function () {
     var root = document.documentElement;
@@ -961,7 +1036,14 @@
     if (r.months != null) { p.months = r.months; }
     return api('counts', p).then(current(state.range, function (d) { last.counts = d; renderCounts(d); })).catch(fail('counts'));
   }
-  function loadTop() { return api('top', { by: state.topBy, days: range().days }).then(current(state.range, function (d) { last.top = d; renderTop(d); })).catch(fail('top')); }
+  function loadTop() {
+    return api('top', { by: state.topBy, days: range().days, limit: state.topLimit, page: state.topPage })
+      .then(current(state.range, function (d) { last.top = d; renderTop(d); })).catch(fail('top'));
+  }
+  function loadRegulars() {
+    return api('regulars', { days: range().days, limit: state.regLimit, page: state.regPage })
+      .then(current(state.range, function (d) { renderRegulars(d); })).catch(fail('regulars'));
+  }
   function loadRemarkable() { return api('remarkable').then(function (d) { last.remarkable = d; renderRemarkable(d); }).catch(fail('remarkable')); }
   function loadPeriodWidgets() {
     var k = state.range;
@@ -969,7 +1051,7 @@
     api('routes', { days: days }).then(current(k, function (d) { last.routes = d; renderRoutes(d); })).catch(fail('routes'));
     api('fleet', { days: days }).then(current(k, function (d) { last.fleet = d; renderFleet(d); })).catch(fail('fleet'));
     api('polar', { days: days }).then(current(k, function (d) { last.polar = d; renderPolar(d); })).catch(fail('polar'));
-    api('regulars', { days: days }).then(current(k, function (d) { renderRegulars(d); })).catch(fail('regulars'));
+    loadRegulars();
     api('heatmap', { days: days }).then(current(k, function (d) { last.heatmap = d; renderHeatmap(d); })).catch(fail('heatmap'));
     api('uptime', { days: days }).then(current(k, function (d) { renderUptime(d); })).catch(fail('uptime'));
     loadTop();
