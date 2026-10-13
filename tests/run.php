@@ -208,6 +208,86 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     @rmdir($logDir);
     putenv('DEBUG_LOG_DIR');
     Settings::set('debug_capture', null);
+    // 1.1.3: READ COMMITTED sessions, and a batch aborted by the database (error 1020 of MariaDB 11.8 snapshot
+    // isolation, simulated by a trigger) is run again from scratch: counted once, debug rows kept.
+    try {
+        $iso = (string) Db::value('SELECT @@transaction_isolation');
+    } catch (Throwable) {
+        $iso = (string) Db::value('SELECT @@tx_isolation');
+    }
+    check('read committed sessions', strtoupper($iso) === 'READ-COMMITTED');
+    $pdo = Db::pdo();
+    $logDir = sys_get_temp_dir() . '/aisseastats-retrylog-' . getmypid();
+    putenv('DEBUG_LOG_DIR=' . $logDir);
+    AISSeaStats\Debug::start([226007350], 1, $t0);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS test_fault (n INT NOT NULL) ENGINE=MEMORY');
+    $pdo->exec('DELETE FROM test_fault');
+    $pdo->exec('INSERT INTO test_fault VALUES (1)');
+    $pdo->exec('DROP TRIGGER IF EXISTS test_fault_hourly');
+    $pdo->exec("CREATE TRIGGER test_fault_hourly BEFORE INSERT ON stats_hourly FOR EACH ROW BEGIN
+        IF (SELECT n FROM test_fault) > 0 THEN
+            UPDATE test_fault SET n = n - 1;
+            SIGNAL SQLSTATE 'HY000' SET MYSQL_ERRNO = 1020, MESSAGE_TEXT = 'Record has changed since last read in table stats_hourly';
+        END IF;
+    END");
+    $tf = $t0 + 180;
+    $hf = intdiv($tf, 3600) * 3600;
+    $msgsBefore = (int) Db::value('SELECT COALESCE(SUM(msgs), 0) FROM stats_hourly WHERE hour_ts = ?', [$hf]);
+    $dbgBefore = (int) Db::value('SELECT COUNT(*) FROM debug_msg');
+    $batch = [
+        ['mmsi' => 226007350, 'type' => 8, 'dac' => 200, 'fid' => 10, 'rxuxtime' => $tf, 'vin' => 'RETRY'],
+        ['mmsi' => 900000031, 'type' => 1, 'rxuxtime' => $tf, 'lat' => 51.95, 'lon' => 4.48],
+        ['mmsi' => 900000031, 'type' => 1, 'rxuxtime' => $tf + 30, 'lat' => 51.951, 'lon' => 4.48],
+    ];
+    $res = (new Ingest($tf + 60))->process($batch);
+    check('conflict retried and counted once', ($res['retries'] ?? 0) === 1 && $res['accepted'] === 3
+        && (int) Db::value('SELECT SUM(msgs) FROM stats_hourly WHERE hour_ts = ?', [$hf]) === $msgsBefore + 3
+        && (int) Db::value('SELECT COUNT(*) FROM debug_msg') === $dbgBefore + 1
+        && (int) Db::value('SELECT COUNT(*) FROM vessel WHERE mmsi = 900000031') === 1);
+    $pdo->exec('UPDATE test_fault SET n = 10');
+    $err = null;
+    try {
+        (new Ingest($tf + 90))->process([['mmsi' => 900000031, 'type' => 1, 'rxuxtime' => $tf + 90, 'lat' => 51.952, 'lon' => 4.48]]);
+    } catch (PDOException $e) {
+        $err = (int) ($e->errorInfo[1] ?? 0);
+    }
+    check('conflict gives up after 4 attempts', $err === 1020 && (int) Db::value('SELECT n FROM test_fault') === 6
+        && (int) Db::value('SELECT SUM(msgs) FROM stats_hourly WHERE hour_ts = ?', [$hf]) === $msgsBefore + 3);
+    check('other errors are not retried', !Ingest::retryable(new RuntimeException('x')));
+    $pdo->exec('DROP TRIGGER IF EXISTS test_fault_hourly');
+    $pdo->exec('DROP TABLE IF EXISTS test_fault');
+    AISSeaStats\Debug::stop();
+    foreach (AISSeaStats\DebugLog::list() as $l) {
+        AISSeaStats\DebugLog::delete($l['name']);
+    }
+    @rmdir($logDir);
+    putenv('DEBUG_LOG_DIR');
+    Settings::set('debug_capture', null);
+    // 1.1.3: traffic density. Two vessels in the same cell in one hour count 2, the same vessel twice in an hour 1,
+    // a base station 0; an hour already added is never added again.
+    Db::pdo()->exec('TRUNCATE TABLE traffic_cell');
+    $th = intdiv($now, 3600) * 3600 - 10 * 3600;
+    $tm = intdiv($th, 60);
+    Ingest::bulk('INSERT IGNORE INTO vessel (mmsi, name, vclass, first_seen, last_seen) VALUES %s',
+        [[900000041, 'D1', 'A', 1, 1], [900000042, 'D2', 'A', 1, 1], [900000043, 'BASE', 'BASE', 1, 1]]);
+    Db::run('DELETE FROM position WHERE mmsi IN (900000041, 900000042, 900000043)');
+    Ingest::bulk('INSERT INTO position (mmsi, minute, lat, lon) VALUES %s', [
+        [900000041, $tm + 1, 51.95501, 4.48], [900000041, $tm + 2, 51.95502, 4.48], [900000042, $tm + 3, 51.95503, 4.48],
+        [900000043, $tm + 4, 51.95504, 4.48], [900000041, $tm + 61, 51.95505, 4.48],
+    ]);
+    Settings::set('traffic_hour', $th);
+    $wk = new Worker();
+    $added = $wk->rollupTraffic($th + 2 * 3600 + 400);
+    $cell = Db::one('SELECT cy, cx, SUM(n) AS n FROM traffic_cell GROUP BY cy, cx');
+    check('traffic density by hour', $added === 2 && $cell !== null && (int) $cell['n'] === 3 && (int) $cell['cy'] === 5195
+        && (int) Db::value('SELECT COUNT(*) FROM traffic_cell') === 1 && (int) Settings::get('traffic_hour') === $th + 2 * 3600);
+    $wk->rollupTraffic($th + 2 * 3600 + 400);
+    check('traffic density not counted twice', (int) Db::value('SELECT SUM(n) FROM traffic_cell') === 3);
+    check('traffic density waits for the hour to end', $wk->rollupTraffic($th + 3 * 3600 + 200) === 0);
+    Db::run("INSERT INTO traffic_cell (day, cy, cx, n) VALUES ('2000-01-01', 1, 1, 5)");
+    $wk->purge($now);
+    check('traffic density purged after 400 days', (int) Db::value("SELECT COUNT(*) FROM traffic_cell WHERE day = '2000-01-01'") === 0);
+    Db::run('DELETE FROM position WHERE mmsi IN (900000041, 900000042, 900000043)');
     // Long range: a lone far position is kept for the track but not for range records;
     // a second one shortly after, at a consistent place, counts (tropospheric ducting).
     $far = static fn (int $t, float $lat): array => ['mmsi' => 227000001, 'type' => 1, 'rxuxtime' => $t, 'lat' => $lat, 'lon' => 4.4792, 'speed' => 12];

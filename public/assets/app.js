@@ -590,6 +590,61 @@
     }));
   }
 
+  // ---------- Traffic density (heatmap of tracks) ----------
+  // Same colours as .density-ramp in app.css.
+  var DENSITY_GRADIENT = { 0.2: '#3987e5', 0.45: '#19b37f', 0.7: '#f2c230', 1: '#f0551e' };
+  var fmtDayLong = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  // Radius in pixels of a cell of about 1.1 km at the current zoom, so the heat keeps its real size.
+  function densityRadius(map) {
+    var lat = map.getCenter().lat;
+    var mPerPx = 40075016.686 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
+    var r = 1100 / mPerPx;
+    return Math.max(5, Math.min(48, r * 1.25)); // a little wider than a cell: neighbouring cells merge into a lane
+  }
+  function renderDensity(data) {
+    var el = $('density-map');
+    if (typeof L.heatLayer !== 'function') { return; }
+    if (!state.maps.density) {
+      state.maps.density = baseMap(el, { maxZoom: 13, zoomSnap: 0.5 });
+      state.maps.densityStation = L.layerGroup().addTo(state.maps.density);
+      state.maps.densityHeat = L.heatLayer([], { minOpacity: 0.35, maxZoom: 13, max: 1, gradient: DENSITY_GRADIENT }).addTo(state.maps.density);
+      state.maps.density.on('zoomend', function () {
+        var r = densityRadius(state.maps.density);
+        state.maps.densityHeat.setOptions({ radius: r, blur: r * 0.85 });
+      });
+    }
+    var map = state.maps.density;
+    var cells = data.cells || [];
+    // Logarithmic intensity: quiet lanes stay visible next to a busy port.
+    var lmax = Math.log(1 + (data.max || 1));
+    var pts = cells.map(function (c) { return [c[0], c[1], Math.log(1 + c[2]) / lmax]; });
+    state.maps.densityStation.clearLayers();
+    var st = stationLatLng();
+    if (st) {
+      L.circleMarker(st, { radius: 6, color: css('--surface'), weight: 2, fillColor: css('--series-2'), fillOpacity: 1 })
+        .bindTooltip(esc(cfg.station.name)).addTo(state.maps.densityStation);
+    }
+    if (state.densityRange !== state.range) {
+      state.densityRange = state.range;
+      map.invalidateSize(); // the card may have just been laid out: frame with the real map size
+      // Frame the busiest areas (the first 2,000, sorted by the server), not the odd far-away cell.
+      var b = cells.slice(0, 2000).map(function (c) { return [c[0], c[1]]; });
+      if (st) { b.push(st); }
+      if (b.length > 1) { map.fitBounds(b, { padding: [16, 16], maxZoom: 11 }); } else if (st) { map.setView(st, 9); } else { map.setView([48.5, 3], 5); }
+    }
+    var r = densityRadius(map);
+    state.maps.densityHeat.setOptions({ radius: r, blur: r * 0.85 });
+    state.maps.densityHeat.setLatLngs(pts);
+    setTimeout(function () { map.invalidateSize(); }, 50);
+    var note = cells.length ? t('density.note', { n: num(cells.length) }) : t('density.empty');
+    var since = range().days != null ? new Date(Date.now() - (range().days - 1) * 86400000).toISOString().slice(0, 10) : '0000-00-00';
+    if (cells.length && data.first_day && data.first_day > since) {
+      note += ' ' + t('density.since', { d: fmtDayLong.format(new Date(data.first_day + 'T00:00:00Z')) });
+    }
+    if (data.truncated) { note += ' ' + t('density.truncated'); }
+    $('density-note').textContent = note;
+  }
+
   // ---------- Range polar ----------
   // Date (with year) and, when known, time of a range record; older records only have their day.
   var fmtRecTime = dtf({ day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -1051,6 +1106,7 @@
     api('routes', { days: days }).then(current(k, function (d) { last.routes = d; renderRoutes(d); })).catch(fail('routes'));
     api('fleet', { days: days }).then(current(k, function (d) { last.fleet = d; renderFleet(d); })).catch(fail('fleet'));
     api('polar', { days: days }).then(current(k, function (d) { last.polar = d; renderPolar(d); })).catch(fail('polar'));
+    api('density', { days: days }).then(current(k, function (d) { renderDensity(d); })).catch(fail('density'));
     loadRegulars();
     api('heatmap', { days: days }).then(current(k, function (d) { last.heatmap = d; renderHeatmap(d); })).catch(fail('heatmap'));
     api('uptime', { days: days }).then(current(k, function (d) { renderUptime(d); })).catch(fail('uptime'));

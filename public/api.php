@@ -64,6 +64,8 @@ try {
             Web::json(remarkable(), 200, 30);
         case 'fleet':
             Web::json(fleet($sinceDay, $sinceTs), 200, 60);
+        case 'density':
+            Web::json(density($sinceDay), 200, 300);
         case 'polar':
             Web::json(polar($sinceDay, $tz), 200, 60);
         case 'regulars':
@@ -261,6 +263,36 @@ function fleet(DateTimeImmutable $sinceDay, int $sinceTs): array
         'flags' => Db::all('SELECT country, COUNT(*) AS vessels FROM vessel WHERE last_seen >= ? AND country IS NOT NULL
             AND vclass NOT IN ' . INFRA . ' GROUP BY country ORDER BY vessels DESC LIMIT 12', [$sinceTs]),
         'classes' => Db::all('SELECT vclass, COUNT(*) AS vessels FROM vessel WHERE last_seen >= ? GROUP BY vclass', [$sinceTs]),
+    ];
+}
+
+/**
+ * Traffic density for the heatmap (1.1.3): vessel-hours per cell of about 1 km over the period, from traffic_cell.
+ * Cells are sent as [lat, lon, weight] at their centre; the busiest 30,000 at most.
+ * @return array<string, mixed>
+ */
+function density(DateTimeImmutable $sinceDay): array
+{
+    $limit = 30000;
+    $cells = [];
+    $max = 0;
+    foreach (Db::all('SELECT cy, cx, SUM(n) AS w FROM traffic_cell WHERE day >= ? GROUP BY cy, cx ORDER BY w DESC LIMIT ' . $limit,
+        [$sinceDay->format('Y-m-d')]) as $r) {
+        $lat = ((int) $r['cy'] + 0.5) / 100;
+        $cos = cos(deg2rad($lat));
+        if ($cos <= 0.01) {
+            continue; // the poles: no cell of 1 km there
+        }
+        $w = (int) $r['w'];
+        $max = max($max, $w);
+        $cells[] = [round($lat, 4), round(((int) $r['cx'] + 0.5) / (100 * $cos), 4), $w];
+    }
+    return [
+        'cells' => $cells,
+        'max' => $max,
+        'truncated' => count($cells) >= $limit,
+        // First day with density data (it starts with the positions still kept when 1.1.3 was installed).
+        'first_day' => Db::value('SELECT MIN(day) FROM traffic_cell'),
     ];
 }
 

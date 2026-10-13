@@ -410,6 +410,10 @@ pre.cmd {
 .hm-head span { font-size: 11px; color: var(--text-3); text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: visible; }
 .hm-cell { display: block; aspect-ratio: 1 / 1; min-height: 10px; border-radius: 3px; background: var(--surface-2); }
 .hm-cell.nodata { background: transparent; outline: 1px dashed var(--grid); outline-offset: -1px; }
+/* Traffic density (1.1.3): same colours as the heat layer in app.js (DENSITY_GRADIENT). */
+.density-legend { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--text-3); }
+.density-ramp { width: 140px; height: 10px; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(57, 135, 229, .35), #3987e5 25%, #19b37f 50%, #f2c230 75%, #f0551e); }
 .hm-legend { display: flex; align-items: center; gap: 3px; margin-top: 8px; font-size: 12px; color: var(--text-3); }
 .hm-legend .hm-cell { width: 14px; min-height: 14px; }
 .hm-legend span:first-child { margin-right: 4px; }

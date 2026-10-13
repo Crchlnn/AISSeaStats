@@ -19,6 +19,8 @@ final class Ingest
     private const MAX_PLAUSIBLE_AIR_KN = 350.0;
     /** Beyond this distance a position only counts for range records when confirmed by a previous one. */
     public const RANGE_CONFIRM_NM = 50.0;
+    /** A batch is tried at most this many times when the database asks to restart the transaction. */
+    private const MAX_ATTEMPTS = 4;
     private const RANGE_CONFIRM_S = 1800;
 
     private int $now;
@@ -147,24 +149,65 @@ final class Ingest
             return $this->stats;
         }
 
+        foreach ($byMmsi as $mmsi => &$list) {
+            usort($list, static fn ($a, $b) => $a['_ts'] <=> $b['_ts']);
+        }
+        unset($list);
+
+        // The batch is written in one transaction. A write conflict with the worker (MariaDB 11.8+ snapshot
+        // isolation, error 1020), a deadlock or a lock timeout is retried from scratch: the batch is not lost.
         $pdo = Db::pdo();
-        $pdo->beginTransaction();
-        try {
-            $this->loadVessels(array_keys($byMmsi));
-            foreach ($byMmsi as $mmsi => $list) {
-                usort($list, static fn ($a, $b) => $a['_ts'] <=> $b['_ts']);
-                foreach ($list as $m) {
-                    $this->handle($mmsi, $m);
+        $debugRows = $this->debugRows;
+        $stats = $this->stats;
+        for ($attempt = 1; ; $attempt++) {
+            $pdo->beginTransaction();
+            try {
+                $this->loadVessels(array_keys($byMmsi));
+                foreach ($byMmsi as $mmsi => $list) {
+                    foreach ($list as $m) {
+                        $this->handle($mmsi, $m);
+                    }
                 }
+                $this->flush();
+                $pdo->commit();
+                break;
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                if ($attempt >= self::MAX_ATTEMPTS || !self::retryable($e)) {
+                    throw $e;
+                }
+                $this->resetBatch();
+                $this->debugRows = $debugRows;
+                $this->stats = $stats;
+                $this->stats['retries'] = $attempt;
+                usleep(random_int(50, 150) * 1000 * $attempt);
             }
-            $this->flush();
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            $pdo->rollBack();
-            throw $e;
         }
         $this->stats['vessels'] = count($byMmsi);
         return $this->stats;
+    }
+
+    /** Errors after which the whole transaction can simply be run again. */
+    public static function retryable(\Throwable $e): bool
+    {
+        // 1020: record changed since last read (snapshot isolation); 1213: deadlock; 1205: lock wait timeout.
+        return $e instanceof \PDOException && in_array((int) ($e->errorInfo[1] ?? 0), [1020, 1205, 1213], true);
+    }
+
+    /** Forget what an aborted attempt computed; the next attempt reloads it from the database. */
+    private function resetBatch(): void
+    {
+        $this->vessels = [];
+        $this->dirty = [];
+        $this->passages = [];
+        $this->hourly = [];
+        $this->vHourly = [];
+        $this->vDaily = [];
+        $this->mType = [];
+        $this->positions = [];
+        $this->polar = [];
     }
 
     /** @param array<string, mixed> $m */
@@ -192,9 +235,12 @@ final class Ingest
     /** @param array<int, int> $mmsis */
     private function loadVessels(array $mmsis): void
     {
+        // Rows are locked until commit (FOR UPDATE), in MMSI order: two batches arriving at the same time
+        // (two receivers) update a vessel one after the other instead of overwriting each other.
+        sort($mmsis);
         foreach (array_chunk($mmsis, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
-            foreach (Db::all("SELECT * FROM vessel WHERE mmsi IN ($in)", $chunk) as $row) {
+            foreach (Db::all("SELECT * FROM vessel WHERE mmsi IN ($in) FOR UPDATE", $chunk) as $row) {
                 $this->vessels[(int) $row['mmsi']] = $row;
             }
         }
@@ -204,9 +250,10 @@ final class Ingest
                 $pids[] = (int) $v['cur_passage_id'];
             }
         }
+        sort($pids);
         foreach (array_chunk($pids, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
-            foreach (Db::all("SELECT * FROM passage WHERE id IN ($in)", $chunk) as $row) {
+            foreach (Db::all("SELECT * FROM passage WHERE id IN ($in) FOR UPDATE", $chunk) as $row) {
                 $this->passages[(int) $row['id']] = $row;
             }
         }

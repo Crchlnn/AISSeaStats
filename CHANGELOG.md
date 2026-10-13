@@ -2,6 +2,18 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.3 — 2026-10-13
+
+Fixes
+- A batch from AIS-catcher could be lost with "Record has changed since last read in table 'stats_hourly'" (MariaDB 11.8, the `mariadb:11` image, refuses by default a transaction that writes a row changed meanwhile by the worker) (issue #2). The database sessions now use READ COMMITTED, and a batch stopped by such a conflict, a deadlock or a lock timeout is run again from the start (up to 4 times), counted once
+- Two batches arriving at the same time (two receivers) no longer overwrite each other's vessel counts: the vessels and passages being updated are locked until the batch is saved
+
+New
+- Traffic density: heatmap of vessel tracks under the routes map (issue #3, suggested by @Phil353556). Vessel-hours per area of about 1 km, computed by the worker every hour and kept 400 days, for any period of the page; base stations and aids to navigation left out. After the update, the worker fills it from the positions still kept (30 days by default) within a few minutes
+- Bundled Leaflet.heat 0.2.0 (BSD-2-Clause) to draw the heatmap
+
+Database: migration 007 (table `traffic_cell`), applied automatically.
+
 ## 1.1.2 — 2026-10-10
 
 Installation and updates

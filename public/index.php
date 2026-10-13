@@ -109,6 +109,16 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
     </div>
   </section>
 
+  <section class="card">
+    <div class="card-head">
+      <h2><?= $t('density.title') ?></h2>
+      <span class="muted small"><?= $t('density.hint') ?></span>
+    </div>
+    <div id="density-map" class="map" role="region" aria-label="<?= $t('density.map') ?>"></div>
+    <div class="density-legend" aria-hidden="true"><span><?= $t('heat.less') ?></span><span class="density-ramp"></span><span><?= $t('density.more') ?></span></div>
+    <p class="muted small" id="density-note"></p>
+  </section>
+
   <div class="grid-2">
     <section class="card">
       <div class="card-head">
@@ -199,6 +209,7 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
 
 <script src="<?= Web::asset('assets/vendor/chartjs/chart.umd.min.js') ?>"></script>
 <script src="<?= Web::asset('assets/vendor/leaflet/leaflet.js') ?>"></script>
+<script src="<?= Web::asset('assets/vendor/leaflet-heat/leaflet-heat.js') ?>"></script>
 <script src="<?= Web::asset('assets/app.js') ?>"></script>
 </body>
 </html>

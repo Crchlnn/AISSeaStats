@@ -2,6 +2,18 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.3 — 13/10/2026
+
+Corrections
+- Un lot d'AIS-catcher pouvait être perdu avec « Record has changed since last read in table 'stats_hourly' » (MariaDB 11.8, celle de l'image `mariadb:11`, refuse par défaut une transaction qui écrit une ligne modifiée entre-temps par le worker) (ticket #2). Les sessions de base de données passent en READ COMMITTED, et un lot arrêté par un tel conflit, un interblocage ou une attente de verrou trop longue est rejoué depuis le début (jusqu'à 4 fois), compté une seule fois
+- Deux lots arrivant en même temps (deux récepteurs) n'écrasent plus mutuellement les compteurs des navires : les navires et passages mis à jour sont verrouillés jusqu'à l'enregistrement du lot
+
+Nouveautés
+- Densité du trafic : heatmap des trajets sous la carte des routes (ticket #3, suggestion de @Phil353556). Navire-heures par zone d'environ 1 km, calculés par le worker chaque heure et gardés 400 jours, pour toutes les périodes de la page ; stations de base et aides à la navigation exclues. Après la mise à jour, le worker la remplit en quelques minutes avec les positions encore conservées (30 jours par défaut)
+- Leaflet.heat 0.2.0 (licence BSD-2) inclus pour dessiner la heatmap
+
+Base de données : migration 007 (table `traffic_cell`), appliquée automatiquement.
+
 ## 1.1.2 — 10/10/2026
 
 Installation et mises à jour

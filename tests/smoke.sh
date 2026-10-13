@@ -136,4 +136,9 @@ curl -s "$BASE/api.php?q=regulars&days=30&limit=50" | grep -q '"limit":50' || fa
 curl -s "$BASE/api.php?q=list&by=day&value=${day}&sort=dist&band=0" | grep -q '"sort":"dist","band":0' || fail "day list without sort or band"
 curl -s "$BASE/api.php?q=list&by=day&value=${day}&band=2" | grep -q '"mmsi":244030470' && fail "band filter lets other bands through"
 
+# 1.1.3: traffic density, filled by the worker hour after hour.
+php -r 'require "src/bootstrap.php"; (new AISSeaStats\Worker())->rollupTraffic(time() + 7200);'
+curl -s "$BASE/api.php?q=density&days=30" | grep -q '"cells":\[\[[0-9.-]*,[0-9.-]*,[1-9]' || fail "density map without cells"
+curl -s "$BASE/" | grep -q 'id="density-map"' || fail "density card missing"
+
 echo "smoke test passed"

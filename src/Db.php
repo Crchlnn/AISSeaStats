@@ -40,6 +40,11 @@ final class Db
             PDO::ATTR_STRINGIFY_FETCHES => false,
         ]);
         $pdo->exec("SET time_zone = '+00:00'");
+        // READ COMMITTED: each statement sees the latest committed data. Since MariaDB 11.8, REPEATABLE READ
+        // (the default) aborts a transaction that writes a row another one changed meanwhile (error 1020),
+        // which happened when ingestion and the worker updated the same hour. Writes here are atomic
+        // (col = col + VALUES(col)), so they do not need a repeatable snapshot.
+        $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
         return $pdo;
     }
 

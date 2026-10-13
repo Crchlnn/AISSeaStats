@@ -24,6 +24,7 @@ final class Worker
         $this->rollupDays($full ? 40 : 2, $now);
         $this->updateTags($full || $this->rulesChanged() ? 0 : $this->lastTags - 120);
         $this->lastTags = $now;
+        $this->rollupTraffic($now);
         if ($now - $this->lastPurge >= 3600) {
             $this->purge($now);
             $this->lastPurge = $now;
@@ -170,12 +171,57 @@ final class Worker
         return $changed;
     }
 
+    /**
+     * Traffic density (1.1.3): adds each completed hour of sampled positions to traffic_cell, as the number of
+     * different vessels seen in each cell of about 1 km that hour (vessel-hours: a lane used by many vessels
+     * stands out, a moored vessel counts once an hour). Base stations and aids to navigation are left out.
+     * After an upgrade it catches up with the positions still kept, $maxHours hours per run.
+     * @return int hours added
+     */
+    public function rollupTraffic(int $now, int $maxHours = 48): int
+    {
+        $until = intdiv($now - 300, 3600) * 3600; // hours ended at least 5 minutes ago (late batches)
+        $from = Settings::get('traffic_hour');
+        if ($from === null) {
+            $min = Db::value('SELECT MIN(minute) FROM position');
+            $from = $min === null ? $until : intdiv((int) $min * 60, 3600) * 3600;
+        }
+        $from = max((int) $from, $until - 400 * 86400);
+        $tz = Settings::timezone();
+        $pdo = Db::pdo();
+        $done = 0;
+        for ($h = $from; $h < $until && $done < $maxHours; $h += 3600, $done++) {
+            $day = (new \DateTimeImmutable('@' . $h))->setTimezone($tz)->format('Y-m-d');
+            // The hour and the progress mark are saved together: a crash never counts an hour twice.
+            $pdo->beginTransaction();
+            try {
+                Db::run('INSERT INTO traffic_cell (day, cy, cx, n)
+                    SELECT ?, cy, cx, COUNT(DISTINCT mmsi) FROM (
+                        SELECT p.mmsi, FLOOR(p.lat * 100) AS cy, FLOOR(p.lon * 100 * COS(RADIANS(p.lat))) AS cx
+                        FROM position p JOIN vessel v ON v.mmsi = p.mmsi
+                        WHERE p.minute >= ? AND p.minute < ? AND v.vclass NOT IN (\'BASE\', \'ATON\')
+                    ) x GROUP BY cy, cx
+                    ON DUPLICATE KEY UPDATE n = n + VALUES(n)', [$day, intdiv($h, 60), intdiv($h, 60) + 60]);
+                Settings::set('traffic_hour', $h + 3600);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
+        }
+        if ($done === 0 && (int) $from !== (int) Settings::get('traffic_hour')) {
+            Settings::set('traffic_hour', $from);
+        }
+        return $done;
+    }
+
     public function purge(int $now): void
     {
         $days = max(1, (int) Settings::get('position_retention_days'));
         self::deleteChunked('DELETE FROM position WHERE minute < ? LIMIT 5000', [intdiv($now - $days * 86400, 60)]);
         self::deleteChunked('DELETE FROM vessel_hourly WHERE hour_ts < ? LIMIT 5000', [$now - 35 * 86400]);
         self::deleteChunked('DELETE FROM ingest_log WHERE ts < ? LIMIT 5000', [$now - 7 * 86400]);
+        self::deleteChunked('DELETE FROM traffic_cell WHERE day < ? LIMIT 5000', [gmdate('Y-m-d', $now - 400 * 86400)]);
         Debug::purge($now);
     }
 
