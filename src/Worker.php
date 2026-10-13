@@ -175,10 +175,11 @@ final class Worker
      * Traffic density (1.1.3): adds each completed hour of sampled positions to traffic_cell, as the number of
      * different vessels seen in each cell of about 1 km that hour (vessel-hours: a lane used by many vessels
      * stands out, a moored vessel counts once an hour). Base stations and aids to navigation are left out.
-     * After an upgrade it catches up with the positions still kept, $maxHours hours per run.
+     * After an upgrade it catches up with the positions still kept, $maxHours hours (10 days) per run:
+     * 30 days of positions take about 3 minutes.
      * @return int hours added
      */
-    public function rollupTraffic(int $now, int $maxHours = 48): int
+    public function rollupTraffic(int $now, int $maxHours = 240): int
     {
         $until = intdiv($now - 300, 3600) * 3600; // hours ended at least 5 minutes ago (late batches)
         $from = Settings::get('traffic_hour');

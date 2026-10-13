@@ -2,6 +2,14 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.4 — 2026-10-13
+
+Improvements
+- Traffic density map: the range of the period (solid line) and the all-time range record (dashed) are drawn by 10° sector around the station, like the range chart; the layer box at the top right of the map shows or hides each one (folded into an icon on a phone). Without density data yet, the map frames the range
+- After an update, the worker builds the density history 240 hours per minute instead of 48: about 3 minutes for 30 days of positions instead of 15. Meanwhile the map says up to when the history is processed, instead of "No data yet"
+
+No database migration.
+
 ## 1.1.3 — 2026-10-13
 
 Fixes

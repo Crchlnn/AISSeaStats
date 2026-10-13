@@ -601,6 +601,39 @@
     var r = 1100 / mPerPx;
     return Math.max(5, Math.min(48, r * 1.25)); // a little wider than a cell: neighbouring cells merge into a lane
   }
+  // Range by direction drawn on the density map (1.1.4): for each 10° sector, the furthest position of the period
+  // (solid) and the all-time record (dashed), as a stepped outline around the station, like the range chart.
+  function destPoint(lat, lon, bearingDeg, nmDist) {
+    var R = 3440.065, d = nmDist / R, b = bearingDeg * Math.PI / 180;
+    var p1 = lat * Math.PI / 180, l1 = lon * Math.PI / 180;
+    var p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+    var l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+    return [p2 * 180 / Math.PI, ((l2 * 180 / Math.PI) + 540) % 360 - 180];
+  }
+  function rangeOutline(st, values) {
+    var pts = [];
+    for (var i = 0; i < 36; i++) {
+      var d = Number(values[i]) || 0;
+      // Arc of the sector at its range (every 2°), so a long range reads as a wedge, not a spike.
+      for (var a = i * 10; a <= i * 10 + 10; a += 2) { pts.push(d > 0 ? destPoint(st[0], st[1], a, d) : st); }
+    }
+    return pts;
+  }
+  function drawDensityRange() {
+    var g = state.maps.densityRange;
+    var st = stationLatLng();
+    if (!g || !st || !last.polar) { return; }
+    g.period.clearLayers();
+    g.all.clearLayers();
+    var c1 = css('--series-1'), c3 = css('--text-2');
+    if (Math.max.apply(null, last.polar.period || [0]) > 0) {
+      L.polygon(rangeOutline(st, last.polar.period), { color: c1, weight: 2, fillColor: c1, fillOpacity: 0.06, interactive: false }).addTo(g.period);
+    }
+    if (Math.max.apply(null, last.polar.all || [0]) > 0) {
+      L.polygon(rangeOutline(st, last.polar.all), { color: c3, weight: 1.5, dashArray: '5 5', fill: false, interactive: false }).addTo(g.all);
+    }
+  }
+
   function renderDensity(data) {
     var el = $('density-map');
     if (typeof L.heatLayer !== 'function') { return; }
@@ -608,6 +641,12 @@
       state.maps.density = baseMap(el, { maxZoom: 13, zoomSnap: 0.5 });
       state.maps.densityStation = L.layerGroup().addTo(state.maps.density);
       state.maps.densityHeat = L.heatLayer([], { minOpacity: 0.35, maxZoom: 13, max: 1, gradient: DENSITY_GRADIENT }).addTo(state.maps.density);
+      // Range outlines, each one can be hidden from the map's layer control.
+      state.maps.densityRange = { period: L.layerGroup().addTo(state.maps.density), all: L.layerGroup().addTo(state.maps.density) };
+      var overlays = {};
+      overlays[esc(t('density.range_period'))] = state.maps.densityRange.period;
+      overlays[esc(t('density.range_all'))] = state.maps.densityRange.all;
+      L.control.layers(null, overlays, { collapsed: window.innerWidth < 600, position: 'topright' }).addTo(state.maps.density);
       state.maps.density.on('zoomend', function () {
         var r = densityRadius(state.maps.density);
         state.maps.densityHeat.setOptions({ radius: r, blur: r * 0.85 });
@@ -630,13 +669,19 @@
       // Frame the busiest areas (the first 2,000, sorted by the server), not the odd far-away cell.
       var b = cells.slice(0, 2000).map(function (c) { return [c[0], c[1]]; });
       if (st) { b.push(st); }
+      if (!cells.length && st && last.polar && last.polar.period) { b = b.concat(rangeOutline(st, last.polar.period)); }
       if (b.length > 1) { map.fitBounds(b, { padding: [16, 16], maxZoom: 11 }); } else if (st) { map.setView(st, 9); } else { map.setView([48.5, 3], 5); }
     }
     var r = densityRadius(map);
     state.maps.densityHeat.setOptions({ radius: r, blur: r * 0.85 });
     state.maps.densityHeat.setLatLngs(pts);
+    drawDensityRange();
     setTimeout(function () { map.invalidateSize(); }, 50);
     var note = cells.length ? t('density.note', { n: num(cells.length) }) : t('density.empty');
+    // After an update the worker first goes through the positions already kept: say how far it is.
+    if (data.computed_until && data.computed_until < Date.now() / 1000 - 2 * 3600) {
+      note = t('density.catching_up', { d: fmtDateTime.format(new Date(data.computed_until * 1000)) }) + (cells.length ? ' ' + note : '');
+    }
     var since = range().days != null ? new Date(Date.now() - (range().days - 1) * 86400000).toISOString().slice(0, 10) : '0000-00-00';
     if (cells.length && data.first_day && data.first_day > since) {
       note += ' ' + t('density.since', { d: fmtDayLong.format(new Date(data.first_day + 'T00:00:00Z')) });
@@ -1105,7 +1150,7 @@
     var days = range().days;
     api('routes', { days: days }).then(current(k, function (d) { last.routes = d; renderRoutes(d); })).catch(fail('routes'));
     api('fleet', { days: days }).then(current(k, function (d) { last.fleet = d; renderFleet(d); })).catch(fail('fleet'));
-    api('polar', { days: days }).then(current(k, function (d) { last.polar = d; renderPolar(d); })).catch(fail('polar'));
+    api('polar', { days: days }).then(current(k, function (d) { last.polar = d; renderPolar(d); drawDensityRange(); })).catch(fail('polar'));
     api('density', { days: days }).then(current(k, function (d) { renderDensity(d); })).catch(fail('density'));
     loadRegulars();
     api('heatmap', { days: days }).then(current(k, function (d) { last.heatmap = d; renderHeatmap(d); })).catch(fail('heatmap'));

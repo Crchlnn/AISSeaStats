@@ -293,6 +293,8 @@ function density(DateTimeImmutable $sinceDay): array
         'truncated' => count($cells) >= $limit,
         // First day with density data (it starts with the positions still kept when 1.1.3 was installed).
         'first_day' => Db::value('SELECT MIN(day) FROM traffic_cell'),
+        // Hours are added up to this time; well behind now while the worker catches up after an update.
+        'computed_until' => Settings::get('traffic_hour') !== null ? (int) Settings::get('traffic_hour') : null,
     ];
 }
 

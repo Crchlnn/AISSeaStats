@@ -2,6 +2,14 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.4 — 13/10/2026
+
+Améliorations
+- Carte de densité du trafic : la portée de la période (trait plein) et le record absolu de portée (pointillés) sont tracés par secteur de 10° autour de la station, comme le graphique de portée ; la case des calques en haut à droite de la carte affiche ou masque chacun (repliée en icône sur téléphone). Sans données de densité, la carte se cadre sur la portée
+- Après une mise à jour, le worker construit l'historique de densité par 240 heures par minute au lieu de 48 : 3 minutes environ pour 30 jours de positions au lieu de 15. En attendant, la carte indique jusqu'à quand l'historique est traité, au lieu de « Pas encore de données »
+
+Pas de migration de base de données.
+
 ## 1.1.3 — 13/10/2026
 
 Corrections
