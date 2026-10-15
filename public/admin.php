@@ -175,8 +175,11 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     throw new InvalidArgumentException(I18n::t('admin.login_failed'));
                 }
                 $p = (string) ($_POST['new'] ?? '');
-                if (mb_strlen($p) < 10 || $p !== (string) ($_POST['new2'] ?? '')) {
+                if ($p === '') { // no minimum length (1.1.5), but not empty
                     throw new InvalidArgumentException(I18n::t('setup.err.password'));
+                }
+                if ($p !== (string) ($_POST['new2'] ?? '')) {
+                    throw new InvalidArgumentException(I18n::t('setup.err.password_match'));
                 }
                 Settings::set('admin_hash', password_hash($p, PASSWORD_DEFAULT));
                 session_regenerate_id(true);
@@ -660,8 +663,8 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
     <input type="text" name="username" value="admin" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
     <div class="row">
       <div class="field"><label for="current"><?= $t('admin.current_password') ?></label><input id="current" name="current" type="password" required autocomplete="current-password"></div>
-      <div class="field"><label for="new"><?= $t('admin.new_password') ?></label><input id="new" name="new" type="password" minlength="10" required autocomplete="new-password"></div>
-      <div class="field"><label for="new2"><?= $t('setup.password2') ?></label><input id="new2" name="new2" type="password" minlength="10" required autocomplete="new-password"></div>
+      <div class="field"><label for="new"><?= $t('admin.new_password') ?></label><input id="new" name="new" type="password" required autocomplete="new-password"></div>
+      <div class="field"><label for="new2"><?= $t('setup.password2') ?></label><input id="new2" name="new2" type="password" required autocomplete="new-password"></div>
     </div>
     <p><button class="btn" type="submit"><?= $t('admin.save') ?></button></p>
   </form>

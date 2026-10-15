@@ -458,6 +458,26 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
         && $rp['rows'][0]['mmsi'] === 900000011 && !isset($rp['rows'][0]['_total']));
     $rp = Stats::regularsPage($t0 - 1, 10, 5);
     check('regulars page past the end', $rp['page'] === 0 && count($rp['rows']) === 2);
+    // 1.1.5: route path = the most typical real track (medoid), not an average and not an odd track.
+    $river = static fn (float $lat): float => 6.2 + 0.03 * sin(($lat - 49.25) * 40);
+    $mk = static function (bool $odd) use ($river): array {
+        $t = [];
+        for ($i = 0; $i <= 60; $i++) {
+            $lat = 49.25 + 0.3 * $i / 60;
+            $t[] = [$lat, $river($lat) + ($odd && $i === 30 ? 0.08 : 0.0003 * sin($i))];
+        }
+        return $t;
+    };
+    $path = Stats::routePath([$mk(true), $mk(false), $mk(false), $mk(false)]);
+    $off = 0.0;
+    foreach ($path ?? [] as $pt) {
+        $off = max($off, abs($pt[1] - $river($pt[0])));
+    }
+    check('route path follows the river', $path !== null && count($path) === 64 && $off < 0.002
+        && abs($path[0][0] - 49.25) < 0.001 && abs($path[63][0] - 49.55) < 0.001);
+    check('route path needs a real track', Stats::routePath([[[49.0, 6.0], [49.0001, 6.0]]]) === null && Stats::routePath([]) === null);
+    $rs = Stats::resampleTrack([[49.0, 6.0], [49.1, 6.0]], 3);
+    check('track resampled evenly', $rs !== null && abs($rs[1][0] - 49.05) < 1e-9 && abs($rs[2][0] - 49.1) < 1e-9);
     check('page sizes', Stats::pageSize(50) === 50 && Stats::pageSize('100') === 100 && Stats::pageSize(7) === 10 && Stats::pageSize(null) === 10);
     $pg = Stats::paged('SELECT mmsi, COUNT(*) OVER () AS _total FROM vessel WHERE mmsi BETWEEN 900000011 AND 900000013 ORDER BY mmsi', [], 10, 0);
     check('paged query', $pg['total'] === 3 && count($pg['rows']) === 3 && array_keys($pg['rows'][0]) === ['mmsi']);

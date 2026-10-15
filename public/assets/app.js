@@ -396,17 +396,38 @@
     var s = cfg.station;
     return (s.lat != null && s.lon != null) ? [Number(s.lat), Number(s.lon)] : null;
   }
-  function arrowHead(from, to, color, weight) {
-    // Small triangle at 62 % of the segment, pointing to the exit.
-    var f = 0.62;
-    var lat = from[0] + (to[0] - from[0]) * f;
-    var lon = from[1] + (to[1] - from[1]) * f;
-    var ang = Math.atan2((to[0] - from[0]), (to[1] - from[1]) * Math.cos(lat * Math.PI / 180));
-    var len = Math.sqrt(Math.pow(to[0] - from[0], 2) + Math.pow((to[1] - from[1]) * Math.cos(lat * Math.PI / 180), 2));
-    var size = len * 0.05 + weight * 0.002;
-    function pt(a, r) { return [lat + Math.sin(a) * r, lon + Math.cos(a) * r / Math.cos(lat * Math.PI / 180)]; }
-    return L.polygon([pt(ang, size), pt(ang + 2.5, size * 0.9), pt(ang - 2.5, size * 0.9)],
-      { color: color, weight: 1, fillColor: color, fillOpacity: 0.95, interactive: false });
+  // Arrow head on a path, sized in pixels (1.1.5): the same size at every zoom, so a short route on a river
+  // is not hidden under its own arrow. Placed at 62 % of the path's length, pointing towards the exit.
+  function arrowLatLngs(map, path, weight) {
+    var pts = path.map(function (ll) { return map.latLngToLayerPoint(ll); });
+    var cum = [0];
+    for (var i = 1; i < pts.length; i++) { cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1])); }
+    var total = cum[cum.length - 1];
+    if (total < 1) { return null; }
+    function at(d) {
+      d = Math.max(0, Math.min(total, d));
+      var j = 1;
+      while (j < pts.length - 1 && cum[j] < d) { j++; }
+      var seg = cum[j] - cum[j - 1], f = seg > 0 ? (d - cum[j - 1]) / seg : 0;
+      return L.point(pts[j - 1].x + (pts[j].x - pts[j - 1].x) * f, pts[j - 1].y + (pts[j].y - pts[j - 1].y) * f);
+    }
+    var size = Math.min(9 + weight * 1.5, total / 3);
+    if (size < 4) { return null; }
+    var mid = total * 0.62;
+    var tip = at(mid + size * 0.6), back = at(mid - size * 0.6);
+    var dx = tip.x - back.x, dy = tip.y - back.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / len, uy = dy / len;
+    var base = L.point(tip.x - ux * size, tip.y - uy * size);
+    var half = size * 0.55;
+    return [tip, L.point(base.x - uy * half, base.y + ux * half), L.point(base.x + uy * half, base.y - ux * half)]
+      .map(function (p) { return map.layerPointToLatLng(p); });
+  }
+  function drawArrows() {
+    var map = state.maps.routes;
+    (state.maps.routeArrows || []).forEach(function (a) {
+      var lls = arrowLatLngs(map, a.path, a.weight);
+      if (lls) { a.poly.setLatLngs(lls); a.poly.setStyle({ opacity: 1, fillOpacity: 0.95 }); } else { a.poly.setStyle({ opacity: 0, fillOpacity: 0 }); }
+    });
   }
   function renderRoutes(data) {
     var el = $('routes-map');
@@ -414,6 +435,7 @@
     if (!state.maps.routes) {
       state.maps.routes = baseMap(el);
       state.maps.routesLayer = L.layerGroup().addTo(state.maps.routes);
+      state.maps.routes.on('zoomend', drawArrows);
     }
     var map = state.maps.routes;
     var layer = state.maps.routesLayer;
@@ -428,18 +450,24 @@
     var routes = data.routes || [];
     var max = routes.length ? Number(routes[0].passages) : 1;
     var lines = [];
-    routes.forEach(function (r, i) {
-      var a = [Number(r.from_lat), Number(r.from_lon)];
-      var b = [Number(r.to_lat), Number(r.to_lon)];
-      var w = 2 + 6 * (Number(r.passages) / max);
+    state.maps.routeArrows = [];
+    // Least used routes first, so the busiest are drawn on top.
+    routes.slice().reverse().forEach(function (r) {
+      var i = routes.indexOf(r);
+      // The route's most typical real track when positions are still kept, else a straight line entry → exit.
+      var path = (r.path && r.path.length > 1) ? r.path : [[Number(r.from_lat), Number(r.from_lon)], [Number(r.to_lat), Number(r.to_lon)]];
+      var w = 2 + 4 * (Number(r.passages) / max);
       var op = 0.95 - i * 0.06;
-      var line = L.polyline([a, b], { color: color, weight: w, opacity: op, lineCap: 'round' })
+      var line = L.polyline(path, { color: color, weight: w, opacity: op, lineCap: 'round', lineJoin: 'round', smoothFactor: 1.5 })
         .bindTooltip(esc(zoneLabel(r.from)) + ' → ' + esc(zoneLabel(r.to)) + ' · ' + esc(t('routes.passages_n', { n: num(r.passages) })), { sticky: true });
       line.addTo(layer);
-      arrowHead(a, b, color, w).addTo(layer);
-      L.circleMarker(a, { radius: 3, color: color, weight: 1, fillColor: css('--surface'), fillOpacity: 1, interactive: false }).addTo(layer);
-      lines.push(line);
-      bounds.push(a, b);
+      // Outlined in the background colour so the arrow stands out on its own line.
+      var poly = L.polygon([path[0], path[0], path[0]], { color: css('--surface'), weight: 1.5, fillColor: color, fillOpacity: 0.95, interactive: false }).addTo(layer);
+      state.maps.routeArrows.push({ path: path, weight: w, poly: poly });
+      line.arrow = poly;
+      L.circleMarker(path[0], { radius: 3, color: color, weight: 1, fillColor: css('--surface'), fillOpacity: 1, interactive: false }).addTo(layer);
+      lines[i] = line;
+      bounds = bounds.concat(path);
     });
     // Re-centre only when the period changes, not on the automatic refresh (keeps the user's zoom).
     if (state.fitRange !== state.range) {
@@ -452,7 +480,8 @@
         map.setView([48.5, 3], 5);
       }
     }
-    setTimeout(function () { map.invalidateSize(); }, 50);
+    drawArrows();
+    setTimeout(function () { map.invalidateSize(); drawArrows(); }, 50);
 
     var list = $('routes-list');
     if (!routes.length) {
@@ -466,8 +495,14 @@
       }).join('');
       Array.prototype.forEach.call(list.querySelectorAll('li[data-i]'), function (li) {
         var line = lines[Number(li.getAttribute('data-i'))];
-        li.addEventListener('mouseenter', function () { line.setStyle({ color: css('--series-2') }); line.bringToFront(); });
-        li.addEventListener('mouseleave', function () { line.setStyle({ color: color }); });
+        li.addEventListener('mouseenter', function () {
+          line.setStyle({ color: css('--series-2') }); line.bringToFront();
+          if (line.arrow) { line.arrow.setStyle({ fillColor: css('--series-2') }); line.arrow.bringToFront(); }
+        });
+        li.addEventListener('mouseleave', function () {
+          line.setStyle({ color: color });
+          if (line.arrow) { line.arrow.setStyle({ fillColor: color }); }
+        });
       });
     }
     var dest = data.destinations || [];

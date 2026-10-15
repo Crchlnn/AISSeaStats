@@ -159,7 +159,7 @@
   "setup.err.name": "Give the station a name (48 characters max).",
   "setup.err.position": "Invalid latitude or longitude.",
   "setup.err.timezone": "Unknown time zone.",
-  "setup.err.password": "The password must be at least 10 characters long.",
+  "setup.err.password": "Choose an admin password.",
   "setup.err.password_match": "The two passwords do not match.",
   "setup.done.title": "Setup complete",
   "setup.done.intro": "One step left: tell AIS-catcher to send its data to AISSeaStats.",

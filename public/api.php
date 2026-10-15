@@ -202,6 +202,30 @@ function routes(int $sinceTs): array
         FROM passage
         WHERE closed = 1 AND start_ts >= ? AND moved_nm >= 0.5 AND entry_zone IS NOT NULL AND exit_zone IS NOT NULL
         GROUP BY entry_zone, exit_zone ORDER BY passages DESC LIMIT 10", [$sinceTs]);
+    // The path drawn for each route: its most typical recent track (positions are kept 30 days by default).
+    // Without positions left for the period, the map draws a straight line from entry to exit as before.
+    foreach ($routes as &$r) {
+        $tracks = [];
+        foreach (Db::all('SELECT mmsi, start_ts, end_ts FROM passage
+                WHERE closed = 1 AND start_ts >= ? AND moved_nm >= 0.5 AND entry_zone = ? AND exit_zone = ?
+                ORDER BY start_ts DESC LIMIT 12', [$sinceTs, $r['from'], $r['to']]) as $p) {
+            // About 120 points per track are plenty for a drawn path: a long passage keeps one position in N
+            // (of the positions actually stored, so a vessel heard every few minutes is not skipped).
+            $pts = [];
+            foreach (Db::all('SELECT lat, lon FROM (
+                        SELECT lat, lon, minute, ROW_NUMBER() OVER (ORDER BY minute) AS rn, COUNT(*) OVER () AS total
+                        FROM position WHERE mmsi = ? AND minute BETWEEN ? AND ?
+                    ) x WHERE (rn - 1) MOD CEIL(total / 120) = 0 OR rn = total ORDER BY minute',
+                [(int) $p['mmsi'], intdiv((int) $p['start_ts'], 60), intdiv((int) $p['end_ts'], 60)]) as $q) {
+                $pts[] = [(float) $q['lat'], (float) $q['lon']];
+            }
+            if (count($pts) >= 3) {
+                $tracks[] = $pts;
+            }
+        }
+        $r['path'] = Stats::routePath($tracks);
+    }
+    unset($r);
     // "FR SML", "SAINT-MALO", "ST.MALO"… grouped on one key (letters and digits, owner's dictionary);
     // meaningless values such as "0" or "Q" are grouped as "unknown".
     $map = Destinations::map();

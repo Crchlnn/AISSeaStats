@@ -159,7 +159,7 @@
   "setup.err.name": "Donnez un nom à la station (48 caractères maximum).",
   "setup.err.position": "Latitude ou longitude invalide.",
   "setup.err.timezone": "Fuseau horaire inconnu.",
-  "setup.err.password": "Le mot de passe doit faire au moins 10 caractères.",
+  "setup.err.password": "Choisissez un mot de passe d'administration.",
   "setup.err.password_match": "Les deux mots de passe ne correspondent pas.",
   "setup.done.title": "Installation terminée",
   "setup.done.intro": "Il reste une étape : dire à AIS-catcher d'envoyer ses données à AISSeaStats.",

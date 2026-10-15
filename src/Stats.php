@@ -54,6 +54,80 @@ final class Stats
         return ['rows' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit];
     }
 
+    /**
+     * Points spread evenly along a track (by distance), $k of them; null for a track too short to draw.
+     * @param array<int, array{0: float, 1: float}> $pts [lat, lon] in time order
+     * @return array<int, array{0: float, 1: float}>|null
+     */
+    public static function resampleTrack(array $pts, int $k): ?array
+    {
+        $n = count($pts);
+        if ($n < 2 || $k < 2) {
+            return null;
+        }
+        $cum = [0.0];
+        for ($i = 1; $i < $n; $i++) {
+            $cum[] = $cum[$i - 1] + Geo::distanceNm($pts[$i - 1][0], $pts[$i - 1][1], $pts[$i][0], $pts[$i][1]);
+        }
+        $total = $cum[$n - 1];
+        if ($total < 0.3) {
+            return null; // less than about 500 m: nothing to draw
+        }
+        $out = [];
+        $j = 1;
+        for ($s = 0; $s < $k; $s++) {
+            $target = $total * $s / ($k - 1);
+            while ($j < $n - 1 && $cum[$j] < $target) {
+                $j++;
+            }
+            $seg = $cum[$j] - $cum[$j - 1];
+            $f = $seg > 0 ? max(0.0, min(1.0, ($target - $cum[$j - 1]) / $seg)) : 0.0;
+            $out[] = [$pts[$j - 1][0] + ($pts[$j][0] - $pts[$j - 1][0]) * $f, $pts[$j - 1][1] + ($pts[$j][1] - $pts[$j - 1][1]) * $f];
+        }
+        return $out;
+    }
+
+    /**
+     * Path drawn for a route (1.1.5): among real tracks of the route, the most typical one (medoid: the track
+     * closest on average to all the others, point by point along the way). A real track follows the river or the
+     * fairway, where an average of tracks would cut across the land; an odd track (detour, bad position) is not chosen.
+     * @param array<int, array<int, array{0: float, 1: float}>> $tracks [lat, lon] points in time order
+     * @return array<int, array{0: float, 1: float}>|null the chosen track, $points points long, rounded
+     */
+    public static function routePath(array $tracks, int $points = 64): ?array
+    {
+        $k = 24;
+        $res = [];
+        foreach ($tracks as $i => $t) {
+            $r = self::resampleTrack($t, $k);
+            if ($r !== null) {
+                $res[$i] = $r;
+            }
+        }
+        if ($res === []) {
+            return null;
+        }
+        $best = null;
+        $bestCost = INF;
+        foreach ($res as $i => $a) {
+            $cost = 0.0;
+            foreach ($res as $j => $b) {
+                if ($i === $j) {
+                    continue;
+                }
+                for ($p = 0; $p < $k; $p++) {
+                    $cost += Geo::distanceNm($a[$p][0], $a[$p][1], $b[$p][0], $b[$p][1]);
+                }
+            }
+            if ($cost < $bestCost) {
+                $bestCost = $cost;
+                $best = $i;
+            }
+        }
+        $path = self::resampleTrack($tracks[$best], $points) ?? [];
+        return array_map(static fn ($pt) => [round($pt[0], 5), round($pt[1], 5)], $path);
+    }
+
     /** SQL giving the band index (0, 1, 2; 3 = unknown) of a distance column. */
     public static function bandSql(string $col): string
     {

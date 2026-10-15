@@ -56,7 +56,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $errors[] = I18n::t('setup.err.timezone');
     }
     $pass = (string) ($_POST['password'] ?? '');
-    if (mb_strlen($pass) < 10) {
+    if ($pass === '') { // no minimum length (1.1.5): the owner chooses; it only must not be empty
         $errors[] = I18n::t('setup.err.password');
     } elseif ($pass !== (string) ($_POST['password2'] ?? '')) {
         $errors[] = I18n::t('setup.err.password_match');
@@ -152,11 +152,11 @@ Page::open(I18n::t('setup.title'));
     <div class="row">
       <div class="field">
         <label for="password"><?= $t('setup.password') ?></label>
-        <input id="password" name="password" type="password" required minlength="10" autocomplete="new-password">
+        <input id="password" name="password" type="password" required autocomplete="new-password">
       </div>
       <div class="field">
         <label for="password2"><?= $t('setup.password2') ?></label>
-        <input id="password2" name="password2" type="password" required minlength="10" autocomplete="new-password">
+        <input id="password2" name="password2" type="password" required autocomplete="new-password">
       </div>
     </div>
     <p><button class="btn" type="submit"><?= $t('setup.submit') ?></button></p>

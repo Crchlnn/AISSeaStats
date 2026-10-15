@@ -2,6 +2,15 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.5 — 15/10/2026
+
+Améliorations
+- Carte des top routes : chaque route est tracée le long de son trajet réel le plus typique, celui de ses 12 derniers passages qui ressemble le plus aux autres, au lieu d'une ligne droite entre l'entrée moyenne et la sortie moyenne. Sur un fleuve ou un chenal sinueux, la route suit l'eau ; un détour ou une position aberrante n'est pas choisi. Sans positions pour la période (gardées 30 jours par défaut), la ligne droite est conservée
+- Flèches des routes dimensionnées en pixels (identiques à tous les zooms) et détourées : les routes courtes d'un fleuve ou d'un port ne sont plus recouvertes par de grands triangles ; la flèche d'une route suit sa mise en évidence depuis la liste
+- Mot de passe d'administration : plus de longueur minimale (il ne doit simplement pas être vide), à l'installation comme au changement, à la demande de plusieurs utilisateurs ; deux mots de passe différents ont désormais leur propre message
+
+Pas de migration de base de données.
+
 ## 1.1.4 — 13/10/2026
 
 Améliorations

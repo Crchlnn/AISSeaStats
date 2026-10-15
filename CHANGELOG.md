@@ -2,6 +2,15 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.5 — 2026-10-15
+
+Improvements
+- Top routes map: each route is drawn along its most typical real track, the one of its 12 latest passages closest on average to the others, instead of a straight line from the average entry to the average exit. On rivers and winding fairways the route follows the water; a detour or a bad position is not chosen. Without positions left for the period (kept 30 days by default), the straight line is kept
+- Route arrows are sized in pixels (the same at every zoom) and outlined: short routes on a river or in a port are no longer covered by large triangles; the arrow of a route follows its highlight from the list
+- Admin password: no minimum length any more (it only must not be empty), at setup and when changing it, as asked by several users; mismatched passwords now get their own message
+
+No database migration.
+
 ## 1.1.4 — 2026-10-13
 
 Improvements

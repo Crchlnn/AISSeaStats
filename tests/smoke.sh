@@ -33,7 +33,7 @@ out=$(curl -s -c "$JAR" -b "$JAR" \
   --data-urlencode "csrf=$token" --data-urlencode "station_name=CI" \
   --data-urlencode "station_lat=51.9225" --data-urlencode "station_lon=4.4792" \
   --data-urlencode "timezone=Europe/Amsterdam" --data-urlencode "lang=en" \
-  --data-urlencode "password=ci-password-123" --data-urlencode "password2=ci-password-123" \
+  --data-urlencode "password=ci7" --data-urlencode "password2=ci7" \
   "$BASE/setup.php")
 echo "$out" | grep -q "Setup complete" || fail "setup wizard did not complete"
 ingest=$(echo "$out" | grep -o '<pre class="cmd">[^<]*' | head -1 | sed 's/<pre class="cmd">//')
@@ -42,8 +42,16 @@ ingest=$(echo "$out" | grep -o '<pre class="cmd">[^<]*' | head -1 | sed 's/<pre 
 rm -f "$JAR"
 token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
 curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=login \
-  --data-urlencode "password=ci-password-123" "$BASE/admin.php"
+  --data-urlencode "password=ci7" "$BASE/admin.php"
 curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | grep -q 'value="logout"' || fail "admin login failed"
+
+# 1.1.5: the admin password has no minimum length (setup above used 3 characters), but cannot be empty.
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=password --data-urlencode "current=ci7" \
+  --data-urlencode "new=" --data-urlencode "new2=" "$BASE/admin.php" | grep -q 'Choose an admin password' || fail "empty admin password accepted"
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=password --data-urlencode "current=ci7" \
+  --data-urlencode "new=z" --data-urlencode "new2=z" "$BASE/admin.php" | grep -q 'Password changed' || fail "short admin password refused"
 
 res=$(printf '{"msgs":[{"mmsi":244030470,"type":1,"lat":51.95,"lon":4.2,"speed":7}]}' | gzip -c |
   curl -s -u "aisseastats:${ingest}" -H "Content-Encoding: gzip" --data-binary @- "$BASE/ingest.php")
