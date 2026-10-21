@@ -13,7 +13,9 @@ use AISSeaStats\Alert;
 use AISSeaStats\Db;
 use AISSeaStats\Geo;
 use AISSeaStats\Ingest;
+use AISSeaStats\LoginGuard;
 use AISSeaStats\Migrator;
+use AISSeaStats\Net;
 use AISSeaStats\Rules;
 use AISSeaStats\Settings;
 use AISSeaStats\Stats;
@@ -478,6 +480,50 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     check('route path needs a real track', Stats::routePath([[[49.0, 6.0], [49.0001, 6.0]]]) === null && Stats::routePath([]) === null);
     $rs = Stats::resampleTrack([[49.0, 6.0], [49.1, 6.0]], 3);
     check('track resampled evenly', $rs !== null && abs($rs[1][0] - 49.05) < 1e-9 && abs($rs[2][0] - 49.1) < 1e-9);
+    // 1.1.6: login throttling, setup code, allow-list, public position.
+    Db::pdo()->exec('DELETE FROM login_attempt');
+    $gt = 1800000000;
+    for ($i = 0; $i < 9; $i++) {
+        LoginGuard::failed('192.0.2.10', $gt + $i);
+    }
+    check('login not locked under the limit', LoginGuard::lockedFor('192.0.2.10', $gt + 20) === 0);
+    LoginGuard::failed('192.0.2.10', $gt + 10);
+    $w = LoginGuard::lockedFor('192.0.2.10', $gt + 20);
+    check('login locked after 10 failures', $w > 0 && $w <= LoginGuard::WINDOW_S && LoginGuard::lockedFor('192.0.2.11', $gt + 20) === 0);
+    check('login lock ends', LoginGuard::lockedFor('192.0.2.10', $gt + 10 + LoginGuard::WINDOW_S + 1) === 0);
+    LoginGuard::succeeded('192.0.2.10');
+    check('login success forgets failures', LoginGuard::lockedFor('192.0.2.10', $gt + 20) === 0);
+    for ($i = 0; $i < 100; $i++) {
+        LoginGuard::failed('198.51.100.' . ($i % 50), $gt + $i);
+    }
+    check('login locked for everybody past the total', LoginGuard::lockedFor('203.0.113.1', $gt + 120) > 0);
+    LoginGuard::clear();
+    check('login lock cleared', LoginGuard::lockedFor('203.0.113.1', $gt + 120) === 0);
+    $wasDone = Settings::get('setup_done');
+    Settings::set('setup_done', false);
+    Db::run("DELETE FROM setting WHERE name IN ('setup_code', 'setup_claim')");
+    $sc = AISSeaStats\SetupCode::current();
+    check('setup code', is_string($sc) && preg_match('/^[A-Z2-9]{4}-[A-Z2-9]{4}$/', $sc) === 1 && AISSeaStats\SetupCode::current() === $sc
+        && AISSeaStats\SetupCode::check(strtolower(str_replace('-', ' ', $sc))) && !AISSeaStats\SetupCode::check('') && !AISSeaStats\SetupCode::check('ABCD-EFGH'));
+    check('setup claimed once', AISSeaStats\SetupCode::claim() && !AISSeaStats\SetupCode::claim());
+    AISSeaStats\SetupCode::release();
+    AISSeaStats\SetupCode::forget();
+    Settings::set('setup_done', true);
+    check('setup code gone once set up', AISSeaStats\SetupCode::current() === null);
+    Settings::set('setup_done', (bool) $wasDone);
+    check('allow-list prefixes', Net::ipAllowed('192.168.1.7', '192.168.1.0/24') && !Net::ipAllowed('8.8.8.8', '192.168.1.0/')
+        && !Net::ipAllowed('8.8.8.8', '192.168.1.0/abc') && !Net::ipAllowed('8.8.8.8', '10.0.0.0/-8') && Net::parseCidr('10.0.0.0/33') === null
+        && Net::ipAllowed('2001:db8:1::1', 'x, 2001:db8::/32') && Net::ipAllowed('10.0.0.5', '10.0.0.5') && !Net::ipAllowed('10.0.0.6', '10.0.0.5'));
+    $keepLat = Settings::get('station_lat');
+    $keepLon = Settings::get('station_lon');
+    Settings::set('station_lat', 51.922512);
+    Settings::set('station_lon', 4.479234);
+    Settings::set('public_position_round', true);
+    $ps = Settings::publicStation();
+    Settings::set('public_position_round', false);
+    check('public position rounded', $ps === ['lat' => 51.92, 'lon' => 4.48] && Settings::publicStation()['lat'] === 51.922512);
+    Settings::set('station_lat', $keepLat);
+    Settings::set('station_lon', $keepLon);
     check('page sizes', Stats::pageSize(50) === 50 && Stats::pageSize('100') === 100 && Stats::pageSize(7) === 10 && Stats::pageSize(null) === 10);
     $pg = Stats::paged('SELECT mmsi, COUNT(*) OVER () AS _total FROM vessel WHERE mmsi BETWEEN 900000011 AND 900000013 ORDER BY mmsi', [], 10, 0);
     check('paged query', $pg['total'] === 3 && count($pg['rows']) === 3 && array_keys($pg['rows'][0]) === ['mmsi']);

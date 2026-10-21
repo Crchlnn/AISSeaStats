@@ -26,12 +26,30 @@ final class Settings
             'passage_gap_min' => 120,
             'position_retention_days' => 30,
             'enrich_enabled' => true,
+            'public_position_round' => false,
             'map_tiles' => 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             'map_attribution' => '© OpenStreetMap contributors',
             'admin_hash' => '',
             'ingest_token_hash' => '',
             'rules' => Rules::defaults(),
         ];
+    }
+
+    /**
+     * Station position as published on the public page and API (1.1.6): exact, or rounded to 0.01° (about 1 km)
+     * when the owner prefers not to publish the antenna's exact place, often their home. Distances, range and
+     * routes are always computed with the exact position.
+     * @return array{lat: float|null, lon: float|null}
+     */
+    public static function publicStation(): array
+    {
+        $lat = self::get('station_lat');
+        $lon = self::get('station_lon');
+        if ($lat === null || $lon === null) {
+            return ['lat' => null, 'lon' => null];
+        }
+        $d = self::get('public_position_round') ? 2 : 6;
+        return ['lat' => round((float) $lat, $d), 'lon' => round((float) $lon, $d)];
     }
 
     public static function get(string $name): mixed

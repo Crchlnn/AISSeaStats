@@ -72,10 +72,28 @@ final class Web
         }
     }
 
+    /** An admin session ends after this long without any page of the admin (1.1.6). */
+    public const ADMIN_IDLE_S = 8 * 3600;
+
     public static function isAdmin(): bool
     {
         self::session();
-        return !empty($_SESSION['admin']) && ($_SESSION['admin_hash'] ?? '') === substr((string) Settings::get('admin_hash'), -16);
+        if (empty($_SESSION['admin']) || ($_SESSION['admin_hash'] ?? '') !== substr((string) Settings::get('admin_hash'), -16)) {
+            return false;
+        }
+        if (time() - (int) ($_SESSION['seen'] ?? 0) > self::ADMIN_IDLE_S) {
+            $_SESSION = [];
+            session_regenerate_id(true);
+            return false;
+        }
+        $_SESSION['seen'] = time();
+        return true;
+    }
+
+    /** True when the browser already holds a session cookie (the public page then checks for an admin). */
+    public static function hasSessionCookie(): bool
+    {
+        return isset($_COOKIE['aisseastats']) && is_string($_COOKIE['aisseastats']) && $_COOKIE['aisseastats'] !== '';
     }
 
     public static function e(mixed $s): string

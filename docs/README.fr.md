@@ -53,7 +53,7 @@ Le script télécharge l'**image toute prête** (Raspberry Pi 64 bits et PC, env
 
 Vous préférez construire l'image vous-même ? `./install.sh --build`. **Comptez alors 5 à 10 minutes sur un Raspberry Pi** (6 min 30 mesurées sur un Pi 4), 1 à 2 minutes sur un PC : les extensions PHP sont compilées une fois. Les deux façons donnent le même résultat et peuvent être échangées à tout moment (voir [Mettre à jour](#mettre-à-jour)).
 
-Ouvrez ensuite `http://<ip-du-pi>:8095`. L'assistant demande le nom et la position de la station, le fuseau, la langue et un mot de passe d'administration, puis affiche le **jeton** et la ligne à ajouter à AIS-catcher. Faites-le tout de suite après l'installation : tant qu'il n'est pas terminé, n'importe qui sur le réseau local peut le faire.
+Ouvrez ensuite `http://<ip-du-pi>:8095`. L'assistant demande le **code d'installation** affiché à la fin d'`install.sh` (aussi dans `docker compose logs app`, ou avec `docker compose exec app php bin/setup-code.php`) : seule la personne qui gère le serveur peut devenir administrateur. Il demande ensuite le nom et la position de la station, le fuseau, la langue et un mot de passe d'administration, puis affiche le **jeton** et la ligne à ajouter à AIS-catcher.
 
 **Sans Git**, avec la seule image toute prête :
 
@@ -63,6 +63,7 @@ curl -fsSLO https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/docker-co
 curl -fsSL https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/.env.example -o .env
 nano .env                  # mettez de longues valeurs aléatoires dans DB_PASSWORD et DB_ROOT_PASSWORD
 docker compose up -d
+docker compose exec app php bin/setup-code.php   # le code demandé par l'assistant
 ```
 
 **Image toute prête** : `ghcr.io/crchlnn/aisseastats`, pour `linux/arm64` (Raspberry Pi 4/5 sous système 64 bits) et `linux/amd64`, publiée automatiquement par GitHub Actions à chaque version. Étiquettes : `latest` (dernière version, par défaut), `1.1` (corrections de la 1.1 seulement), `1.1.2` (exactement cette version) ; pour en fixer une, mettez par exemple `AISSEASTATS_VERSION=1.1` dans `.env`. Les évolutions de la base s'appliquent au démarrage du conteneur : un outil de mise à jour automatique (Watchtower ou équivalent) qui télécharge la nouvelle image et redémarre `app` et `worker` fonctionne avec vos données. Les mises à jour s'installent alors sans vous : gardez une sauvegarde, ou fixez une étiquette pour choisir le moment.
@@ -144,6 +145,7 @@ La plus récente en premier. Détail, corrections et évolutions de la base pour
 
 | Version | Date | Nouveautés |
 |---|---|---|
+| 1.1.6 | 21/10/2026 | Corrections de la revue de sécurité : tentatives de connexion limitées, code d'installation à usage unique, photos cherchées seulement pour les navires reçus, envois refusés non journalisés, `INGEST_ALLOW` strict, worker sans root, option d'arrondi de la position publiée, expiration des sessions admin |
 | 1.1.5 | 15/10/2026 | Top routes tracées le long de leur trajet réel le plus typique au lieu d'une ligne droite (fleuves, chenaux), flèches de même taille à tous les zooms ; plus de longueur minimale pour le mot de passe d'administration |
 | 1.1.4 | 13/10/2026 | Carte de densité : portée de la période et record absolu de portée tracés par direction, chacun masquable ; historique calculé environ 5 fois plus vite après une mise à jour, avec son avancement affiché |
 | 1.1.3 | 13/10/2026 | Correction : un lot d'AIS-catcher pouvait être perdu avec MariaDB 11.8 (« Record has changed since last read », ticket #2), désormais réessayé ; carte de densité du trafic sous la carte des routes (ticket #3) |
@@ -181,6 +183,8 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 | Tout supprimer | `docker compose down -v` |
 
 ## Bon à savoir
+
+- **Sécurité (1.1.6)** : 10 mauvais mots de passe depuis une adresse (ou 100 au total) en 15 minutes bloquent la connexion admin pendant 15 minutes (`bin/reset-admin.php` lève le blocage) ; une session admin expire après 8 h d'inactivité ; la page publique ne pose aucun cookie aux visiteurs. Admin → Station permet d'arrondir à environ 1 km la position publiée sur la page et l'API, utile si l'antenne est à domicile et la page publique. Une entrée invalide dans `INGEST_ALLOW` est ignorée (et signalée dans les journaux) au lieu d'ouvrir l'ingestion à tous. Le conteneur worker tourne en `www-data`, sans privilège.
 
 - **Zones nommées** (page admin) : par défaut une route va d'un secteur à un autre (`SO → NE`). Ajoutez une écluse, un port ou une ville pour lire `Port → Écluse nord`.
 - **Dictionnaire des destinations** (page admin) : les équipages saisissent la destination librement (`FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`…). Regroupez les variantes d'un port sous un seul nom, par exemple `SAINT-MALO, ST-MALO, FR SML` → `FRSML`. Les valeurs sans signification (`0`, `Q`…) s'affichent « Inconnue ».

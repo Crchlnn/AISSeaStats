@@ -224,6 +224,8 @@ final class Worker
         self::deleteChunked('DELETE FROM ingest_log WHERE ts < ? LIMIT 5000', [$now - 7 * 86400]);
         self::deleteChunked('DELETE FROM traffic_cell WHERE day < ? LIMIT 5000', [gmdate('Y-m-d', $now - 400 * 86400)]);
         Debug::purge($now);
+        LoginGuard::purge($now);
+        Enrich::purge($now);
     }
 
     /** @param array<int, mixed> $params */

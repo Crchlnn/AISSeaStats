@@ -6,9 +6,11 @@ declare(strict_types=1);
 require __DIR__ . '/../src/bootstrap.php';
 
 use AISSeaStats\Db;
+use AISSeaStats\LoginGuard;
 use AISSeaStats\Settings;
 
 Db::waitReady(30);
 $pass = bin2hex(random_bytes(8));
 Settings::set('admin_hash', password_hash($pass, PASSWORD_DEFAULT));
+LoginGuard::clear(); // lift a login lockout as well
 echo "New admin password: {$pass}\nChange it from the admin page after logging in.\n";

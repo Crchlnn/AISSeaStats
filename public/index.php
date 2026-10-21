@@ -15,7 +15,8 @@ try {
     http_response_code(503);
     exit('Database unavailable. Check that the "db" container is running.');
 }
-Web::session();
+// A session only for visitors who already have one (the admin): anonymous visitors get no cookie (1.1.6).
+$isAdmin = Web::hasSessionCookie() && Web::isAdmin();
 Web::headers();
 
 $cfg = [
@@ -23,14 +24,14 @@ $cfg = [
     'i18n' => I18n::dict(),
     'station' => [
         'name' => Settings::get('station_name'),
-        'lat' => Settings::get('station_lat'),
-        'lon' => Settings::get('station_lon'),
+        'lat' => Settings::publicStation()['lat'],
+        'lon' => Settings::publicStation()['lon'],
     ],
     'tz' => Settings::timezone()->getName(),
     'tiles' => Settings::get('map_tiles'),
     'attribution' => Settings::get('map_attribution'),
     'version' => VERSION,
-    'isAdmin' => Web::isAdmin(),
+    'isAdmin' => $isAdmin,
 ];
 $t = static fn (string $k): string => Web::e(I18n::t($k));
 ?>

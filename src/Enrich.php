@@ -16,6 +16,8 @@ final class Enrich
 {
     private const TTL = 30 * 86400;
     private const RETRY = 3600;
+    /** At most this many online look-ups per minute for the whole station (1.1.6). */
+    public const MAX_PER_MINUTE = 30;
     private const USER_AGENT = 'AISSeaStats/1.0 (https://github.com/Crchlnn/AISSeaStats)';
     private const COMMONS = 'https://commons.wikimedia.org/w/api.php';
     private const WIKIDATA = 'https://www.wikidata.org/w/api.php';
@@ -61,6 +63,9 @@ final class Enrich
         if (!Settings::get('enrich_enabled')) {
             return $row !== null ? self::fromRow($row) : null;
         }
+        if ((int) Db::value('SELECT COUNT(*) FROM photo_lookup WHERE fetched_at >= ?', [time() - 60]) >= self::MAX_PER_MINUTE) {
+            return $row !== null ? self::fromRow($row) : null; // busy minute: answer from the cache, look up later
+        }
         $found = $lookup();
         if ($found === false) {
             // Network error: keep what we had, try again in an hour.
@@ -75,6 +80,12 @@ final class Enrich
         ]);
         return $found === null ? null : self::fromRow(['found' => 1, 'thumb_url' => $found['thumb'], 'page_url' => $found['page'],
             'author' => $found['author'], 'license' => $found['license'], 'source' => $found['source']]);
+    }
+
+    /** Forget look-ups older than their validity (worker, hourly): they would be made again anyway. */
+    public static function purge(int $now): void
+    {
+        Db::run('DELETE FROM photo_lookup WHERE fetched_at < ? LIMIT 5000', [$now - self::TTL - 86400]);
     }
 
     /** @param array<string, mixed> $row @return array{thumb:string, page:?string, author:?string, license:?string, source:string}|null */

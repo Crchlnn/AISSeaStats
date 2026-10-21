@@ -11,6 +11,7 @@ use AISSeaStats\Debug;
 use AISSeaStats\DebugLog;
 use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
+use AISSeaStats\LoginGuard;
 use AISSeaStats\Page;
 use AISSeaStats\Rules;
 use AISSeaStats\Settings;
@@ -34,15 +35,23 @@ $action = (string) ($_POST['action'] ?? '');
 // ---------- Login / logout ----------
 if ($action === 'login') {
     Web::checkCsrf();
-    if (password_verify((string) ($_POST['password'] ?? ''), (string) Settings::get('admin_hash'))) {
+    // 1.1.6: failed logins are counted per address and in total; past the limit, refused at once for a while.
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $wait = LoginGuard::lockedFor($ip, time());
+    if ($wait > 0) {
+        $flash[] = ['err', I18n::t('admin.login_locked', ['n' => (string) max(1, (int) ceil($wait / 60))])];
+    } elseif (password_verify((string) ($_POST['password'] ?? ''), (string) Settings::get('admin_hash'))) {
+        LoginGuard::succeeded($ip);
         session_regenerate_id(true);
         $_SESSION['admin'] = true;
         $_SESSION['admin_hash'] = substr((string) Settings::get('admin_hash'), -16);
+        $_SESSION['seen'] = time();
         header('Location: admin.php');
         exit;
+    } else {
+        LoginGuard::failed($ip, time());
+        $flash[] = ['err', I18n::t('admin.login_failed')];
     }
-    sleep(2);
-    $flash[] = ['err', I18n::t('admin.login_failed')];
 }
 if ($action === 'logout') {
     Web::checkCsrf();
@@ -122,6 +131,7 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 Settings::set('passage_gap_min', max(15, min(1440, (int) ($_POST['passage_gap_min'] ?? 120))));
                 Settings::set('position_retention_days', max(1, min(365, (int) ($_POST['position_retention_days'] ?? 30))));
                 Settings::set('enrich_enabled', isset($_POST['enrich_enabled']));
+                Settings::set('public_position_round', isset($_POST['public_position_round']));
                 Settings::set('map_tiles', $tiles);
                 Settings::set('map_attribution', mb_substr(strip_tags((string) ($_POST['map_attribution'] ?? '')), 0, 200));
                 $flash[] = ['ok', I18n::t('admin.saved')];
@@ -321,6 +331,11 @@ $lastBatch = Db::one('SELECT ts, station, error FROM ingest_log ORDER BY id DESC
 $hour = Db::one('SELECT COUNT(*) batches, COALESCE(SUM(msgs), 0) msgs, COALESCE(SUM(error IS NOT NULL), 0) errors, COALESCE(AVG(ms), 0) ms
                  FROM ingest_log WHERE ts >= ?', [$now - 3600]);
 $lastError = Db::one('SELECT ts, error FROM ingest_log WHERE error IS NOT NULL ORDER BY id DESC LIMIT 1');
+// Refused posts (wrong or missing token) are kept apart since 1.1.6: show whichever is the most recent.
+$rejected = Settings::get('ingest_rejected');
+if (is_array($rejected) && (int) ($rejected['ts'] ?? 0) > (int) ($lastError['ts'] ?? 0)) {
+    $lastError = ['ts' => (int) $rejected['ts'], 'error' => (string) ($rejected['error'] ?? '')];
+}
 $heartbeat = (int) Settings::get('worker_heartbeat');
 $dbSize = (int) Db::value('SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE()');
 // MariaDB's redo log has a fixed size (96 MB by default) and explains most of the Docker volume's size.
@@ -409,6 +424,8 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
       <div class="field"><label for="station_lon"><?= $t('setup.lon') ?></label>
         <input id="station_lon" name="station_lon" required value="<?= Web::e($s['station_lon']) ?>"></div>
     </div>
+    <label class="check"><input type="checkbox" name="public_position_round"<?= $s['public_position_round'] ? ' checked' : '' ?>> <?= $t('admin.position_round') ?></label>
+    <p class="help muted small"><?= $t('admin.position_round_help') ?></p>
     <div class="row">
       <div class="field"><label for="timezone"><?= $t('setup.timezone') ?></label>
         <select id="timezone" name="timezone"><?php foreach (Page::timezones() as $tz): ?>

@@ -104,12 +104,11 @@ function summary(DateTimeImmutable $today, int $now): array
     );
     $record = Db::one('SELECT r.day, r.max_dist_nm, r.mmsi, v.name FROM range_polar r
                        LEFT JOIN vessel v ON v.mmsi = r.mmsi ORDER BY r.max_dist_nm DESC LIMIT 1');
-    $lastBatch = Db::one('SELECT ts, error FROM ingest_log ORDER BY id DESC LIMIT 1');
     return [
         'station' => [
             'name' => Settings::get('station_name'),
-            'lat' => Settings::get('station_lat'),
-            'lon' => Settings::get('station_lon'),
+            'lat' => Settings::publicStation()['lat'],
+            'lon' => Settings::publicStation()['lon'],
         ],
         'now' => $now,
         'vessels' => [
@@ -124,7 +123,6 @@ function summary(DateTimeImmutable $today, int $now): array
         'range_today' => Db::value('SELECT MAX(max_dist_nm) FROM range_polar WHERE day = ?', [$d]),
         'range_record' => $record,
         'last_msg' => (int) Db::value('SELECT MAX(last_seen) FROM vessel'),
-        'last_batch' => $lastBatch,
         'first_day' => Db::value('SELECT MIN(day) FROM vessel_daily'),
     ];
 }
@@ -392,7 +390,12 @@ function vessel(int $mmsi): array
 /** Photo looked up separately so that the vessel card opens at once. @return array<string, mixed> */
 function photo(int $mmsi): array
 {
-    $imo = Db::value('SELECT imo FROM vessel WHERE mmsi = ?', [$mmsi]);
+    // Only for a vessel this station has received (1.1.6): no online look-up for any number sent to the API.
+    $v = Db::one('SELECT imo FROM vessel WHERE mmsi = ?', [$mmsi]);
+    if ($v === null) {
+        return ['photo' => null];
+    }
+    $imo = $v['imo'];
     try {
         return ['photo' => Enrich::photo($mmsi, $imo !== null ? (int) $imo : null)];
     } catch (Throwable $e) {

@@ -2,6 +2,21 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.1.6 — 2026-10-21
+
+Security (code review of 2026-10-21; no critical or high finding)
+- Admin login: failed attempts are counted per address and in total; after 10 failures from one address, or 100 in all, within 15 minutes, logins are refused for 15 minutes, even with the right password. The 2-second pause after a failure is gone: it held a PHP worker, so a few failed logins a second could stall the site. `bin/reset-admin.php` also lifts the lock
+- Setup wizard: asks for a one-time code shown at the end of `install.sh`, in the container logs and by `bin/setup-code.php`, so only the person running the server can become admin; two forms sent at the same time can no longer both complete the setup
+- Vessel photos: looked up online only for vessels the station received, at most 30 look-ups a minute; old look-ups are purged
+- Ingestion: posts with a wrong or missing token are no longer logged as batches (anyone could fill the log or distort the health figures); the admin still shows the last refusal, to spot a wrong token in AIS-catcher. The public summary no longer includes the last batch
+- `INGEST_ALLOW`: an entry with a missing or invalid prefix (`192.168.1.0/`, `/abc`, `/40`) is ignored and logged; it used to allow every address
+- Worker container: runs as `www-data`, without Linux capabilities and with `no-new-privileges`
+- Admin → Station: option to round the position published on the public page and API to about 1 km; distances still use the exact position
+- Admin sessions end after 8 hours without activity; the public page no longer opens a session for every visitor
+- Zone names escaped on the admin map; `SECURITY.md` and the photo setting label updated (the photo look-up is not the only outbound call any more)
+
+Database: migration 008 (failed admin logins), applied automatically.
+
 ## 1.1.5 — 2026-10-15
 
 Improvements

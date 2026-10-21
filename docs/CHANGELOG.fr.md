@@ -2,6 +2,21 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.1.6 — 21/10/2026
+
+Sécurité (revue de code du 21/10/2026 ; aucun constat critique ni haut)
+- Connexion admin : les échecs sont comptés par adresse et au total ; après 10 échecs depuis une adresse, ou 100 en tout, en 15 minutes, la connexion est refusée pendant 15 minutes, même avec le bon mot de passe. La pause de 2 secondes après un échec disparaît : elle occupait un processus PHP, si bien que quelques échecs par seconde pouvaient figer le site. `bin/reset-admin.php` lève aussi le blocage
+- Assistant d'installation : demande un code à usage unique affiché à la fin d'`install.sh`, dans les journaux du conteneur et par `bin/setup-code.php`, pour que seule la personne qui gère le serveur devienne administrateur ; deux formulaires envoyés en même temps ne peuvent plus terminer tous les deux l'installation
+- Photos de navires : cherchées en ligne seulement pour les navires reçus par la station, 30 recherches par minute au plus ; les anciennes recherches sont purgées
+- Ingestion : les envois avec un jeton faux ou absent ne sont plus journalisés comme des lots (n'importe qui pouvait remplir le journal ou fausser les indicateurs) ; l'admin affiche toujours le dernier refus, pour repérer un mauvais jeton dans AIS-catcher. Le résumé public ne contient plus le dernier lot
+- `INGEST_ALLOW` : une entrée au préfixe absent ou invalide (`192.168.1.0/`, `/abc`, `/40`) est ignorée et signalée dans les journaux ; elle autorisait toutes les adresses
+- Conteneur worker : tourne en `www-data`, sans capacités Linux et avec `no-new-privileges`
+- Admin → Station : option pour arrondir à environ 1 km la position publiée sur la page et l'API ; les distances utilisent toujours la position exacte
+- Les sessions admin expirent après 8 h d'inactivité ; la page publique n'ouvre plus de session pour chaque visiteur
+- Noms de zones échappés sur la carte de l'admin ; `SECURITY.md` et le libellé du réglage des photos mis à jour (la recherche de photos n'est plus le seul appel sortant)
+
+Base de données : migration 008 (échecs de connexion admin), appliquée automatiquement.
+
 ## 1.1.5 — 15/10/2026
 
 Améliorations

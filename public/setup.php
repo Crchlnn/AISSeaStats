@@ -12,7 +12,9 @@ use AISSeaStats\Db;
 use AISSeaStats\I18n;
 use AISSeaStats\Migrator;
 use AISSeaStats\Page;
+use AISSeaStats\LoginGuard;
 use AISSeaStats\Settings;
+use AISSeaStats\SetupCode;
 use AISSeaStats\Web;
 
 try {
@@ -43,6 +45,15 @@ $values = [
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     Web::checkCsrf();
+    // 1.1.6: one-time setup code shown to whoever runs the server, checked with the same throttling as logins.
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $wait = LoginGuard::lockedFor($ip, time());
+    if ($wait > 0) {
+        $errors[] = I18n::t('admin.login_locked', ['n' => (string) max(1, (int) ceil($wait / 60))]);
+    } elseif (!SetupCode::check((string) ($_POST['setup_code'] ?? ''))) {
+        LoginGuard::failed($ip, time());
+        $errors[] = I18n::t('setup.err.code');
+    }
     $name = trim($values['station_name']);
     if ($name === '' || mb_strlen($name) > 48) {
         $errors[] = I18n::t('setup.err.name');
@@ -61,19 +72,31 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     } elseif ($pass !== (string) ($_POST['password2'] ?? '')) {
         $errors[] = I18n::t('setup.err.password_match');
     }
+    if ($errors === [] && !SetupCode::claim()) {
+        header('Location: index.php'); // another form completed the setup at the same moment
+        exit;
+    }
     if ($errors === []) {
-        Settings::set('station_name', $name);
-        Settings::set('station_lat', round((float) $lat, 6));
-        Settings::set('station_lon', round((float) $lon, 6));
-        Settings::set('timezone', $values['timezone']);
-        Settings::set('lang', in_array($values['lang'], ['fr', 'en'], true) ? $values['lang'] : 'auto');
-        Settings::set('admin_hash', password_hash($pass, PASSWORD_DEFAULT));
-        $token = Page::newToken();
-        Settings::set('setup_done', true);
+        try {
+            Settings::set('station_name', $name);
+            Settings::set('station_lat', round((float) $lat, 6));
+            Settings::set('station_lon', round((float) $lon, 6));
+            Settings::set('timezone', $values['timezone']);
+            Settings::set('lang', in_array($values['lang'], ['fr', 'en'], true) ? $values['lang'] : 'auto');
+            Settings::set('admin_hash', password_hash($pass, PASSWORD_DEFAULT));
+            $token = Page::newToken();
+            Settings::set('setup_done', true);
+        } catch (Throwable $e) {
+            SetupCode::release(); // let the wizard be completed again
+            throw $e;
+        }
+        SetupCode::forget();
+        LoginGuard::succeeded($ip);
         Web::session();
         session_regenerate_id(true);
         $_SESSION['admin'] = true;
         $_SESSION['admin_hash'] = substr((string) Settings::get('admin_hash'), -16);
+        $_SESSION['seen'] = time();
 
         Page::open(I18n::t('setup.done.title'));
         echo '<section class="card"><h2>' . $t('setup.done.title') . '</h2>'
@@ -116,6 +139,12 @@ Page::open(I18n::t('setup.title'));
     <input type="hidden" name="csrf" value="<?= Web::e(Web::csrfToken()) ?>">
     <?php /* Username field for password managers: without it they take the last text field (longitude) as the user name. */ ?>
     <input type="text" name="username" value="admin" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
+    <div class="field">
+      <label for="setup_code"><?= $t('setup.code') ?></label>
+      <input id="setup_code" name="setup_code" required maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"
+        value="<?= Web::e((string) ($_POST['setup_code'] ?? '')) ?>" placeholder="ABCD-EFGH">
+      <span class="help muted small"><?= $t('setup.code_help') ?></span>
+    </div>
     <div class="field">
       <label for="station_name"><?= $t('setup.station_name') ?></label>
       <input id="station_name" name="station_name" required maxlength="48" autocomplete="off" value="<?= Web::e($values['station_name']) ?>" placeholder="<?= $t('setup.ph_name') ?>">

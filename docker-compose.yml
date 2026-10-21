@@ -62,6 +62,10 @@ services:
     image: ghcr.io/crchlnn/aisseastats:${AISSEASTATS_VERSION:-latest}
     restart: unless-stopped
     command: ["worker"]
+    # 1.1.6: background jobs run without root and without any Linux capability (they write nothing on disk).
+    user: www-data
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       db:
         condition: service_healthy

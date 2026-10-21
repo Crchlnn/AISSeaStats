@@ -8,6 +8,12 @@
     });
   });
 
+  // Leaflet tooltips take HTML: zone names are escaped (1.1.6).
+  function escHtml(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   var el = document.getElementById('zone-map');
   if (!el || typeof L === 'undefined') { return; }
   var lat = parseFloat(el.getAttribute('data-lat'));
@@ -28,7 +34,7 @@
     var center = L.latLng(Number(z.lat), Number(z.lon));
     var radius = Number(z.radius_nm) * 1852;
     L.circle(center, { radius: radius, color: accent, weight: 2, fillOpacity: 0.12 })
-      .bindTooltip(z.name, { permanent: true, direction: 'center' }).addTo(map);
+      .bindTooltip(escHtml(z.name), { permanent: true, direction: 'center' }).addTo(map);
     extend(center.toBounds(radius * 2));
   });
   if (bounds) { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 }); }

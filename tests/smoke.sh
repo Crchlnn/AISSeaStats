@@ -19,7 +19,7 @@ sleep 1
 # shellcheck disable=SC2016 # PHP code, $t must not be expanded by the shell
 php -r 'require "src/bootstrap.php"; AISSeaStats\Db::waitReady(30); AISSeaStats\Migrator::run();
   foreach (["setting", "vessel", "stats_hourly", "stats_daily", "vessel_hourly", "vessel_daily", "msgtype_daily",
-    "position", "passage", "range_polar", "ingest_log", "zone", "vessel_photo", "photo_lookup", "debug_msg"] as $t) {
+    "position", "passage", "range_polar", "ingest_log", "zone", "vessel_photo", "photo_lookup", "debug_msg", "login_attempt"] as $t) {
       AISSeaStats\Db::pdo()->exec("DELETE FROM $t");
   }'
 
@@ -29,8 +29,16 @@ fail() { echo "FAIL  $*"; exit 1; }
 token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/setup.php" | csrf)
 [ -n "$token" ] || fail "setup form has no CSRF token"
 
+# 1.1.6: the wizard asks for the one-time setup code shown to whoever runs the server.
+code=$(php bin/setup-code.php --quiet)
+echo "$code" | grep -Eq '^[A-Z2-9]{4}-[A-Z2-9]{4}$' || fail "no setup code: $code"
+curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" --data-urlencode "setup_code=WRNG-CODE" \
+  --data-urlencode "station_name=CI" --data-urlencode "station_lat=51.9225" --data-urlencode "station_lon=4.4792" \
+  --data-urlencode "timezone=Europe/Amsterdam" --data-urlencode "lang=en" \
+  --data-urlencode "password=ci7" --data-urlencode "password2=ci7" "$BASE/setup.php" | grep -q "Wrong setup code" || fail "wrong setup code accepted"
+
 out=$(curl -s -c "$JAR" -b "$JAR" \
-  --data-urlencode "csrf=$token" --data-urlencode "station_name=CI" \
+  --data-urlencode "csrf=$token" --data-urlencode "setup_code=$(echo "$code" | tr '[:upper:]' '[:lower:]' | tr -d '-')" --data-urlencode "station_name=CI" \
   --data-urlencode "station_lat=51.9225" --data-urlencode "station_lon=4.4792" \
   --data-urlencode "timezone=Europe/Amsterdam" --data-urlencode "lang=en" \
   --data-urlencode "password=ci7" --data-urlencode "password2=ci7" \
@@ -149,5 +157,29 @@ php -r 'require "src/bootstrap.php"; (new AISSeaStats\Worker())->rollupTraffic(t
 curl -s "$BASE/api.php?q=density&days=30" | grep -q '"cells":\[\[[0-9.-]*,[0-9.-]*,[1-9]' || fail "density map without cells"
 curl -s "$BASE/api.php?q=density&days=30" | grep -q '"computed_until":[0-9]' || fail "density without progress"
 curl -s "$BASE/" | grep -q 'id="density-map"' || fail "density card missing"
+
+# 1.1.6 security fixes.
+php bin/setup-code.php | grep -q "already completed" || fail "setup code still offered after setup"
+logs=$(php -r 'require "src/bootstrap.php"; echo AISSeaStats\Db::value("SELECT COUNT(*) FROM ingest_log");')
+code=$(curl -s -o /dev/null -w '%{http_code}' -u "aisseastats:wrong" -H 'Content-Type: application/json' -d '{"msgs":[]}' "$BASE/ingest.php")
+[ "$code" = "401" ] || fail "wrong ingest token returned $code"
+[ "$(php -r 'require "src/bootstrap.php"; echo AISSeaStats\Db::value("SELECT COUNT(*) FROM ingest_log");')" = "$logs" ] || fail "refused ingest post logged as a batch"
+curl -s "$BASE/api.php?q=summary" | grep -q '"last_batch"' && fail "summary still shows the last batch"
+curl -s "$BASE/api.php?q=photo&mmsi=987654321" | grep -q '"photo":null' || fail "photo for an unknown vessel"
+[ "$(php -r 'require "src/bootstrap.php"; echo AISSeaStats\Db::value("SELECT COUNT(*) FROM photo_lookup WHERE k LIKE ?", ["%987654321%"]);')" = "0" ] || fail "photo looked up for an unknown vessel"
+# Ten wrong passwords lock the login, even for the right one; reset-admin lifts it.
+rm -f "$JAR"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+  curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=login --data-urlencode "password=bad" "$BASE/admin.php"
+done
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=login --data-urlencode "password=z" "$BASE/admin.php" | grep -q "Too many failed attempts" || fail "login not locked after 10 failures"
+newpass=$(php bin/reset-admin.php | sed -n 's/^New admin password: //p')
+token=$(curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | csrf)
+curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$token" -d action=login --data-urlencode "password=$newpass" "$BASE/admin.php"
+curl -s -c "$JAR" -b "$JAR" "$BASE/admin.php" | grep -q 'value="logout"' || fail "reset-admin did not lift the lockout"
+# The public page gives anonymous visitors no session cookie.
+curl -s -D - -o /dev/null "$BASE/" | grep -qi '^set-cookie: aisseastats' && fail "anonymous visitor got a session"
 
 echo "smoke test passed"

@@ -105,7 +105,11 @@ ip=${ip:-localhost}
 if [ "${status:-}" = "healthy" ]; then
   say ""
   say "AISSeaStats is running: http://${ip}:${port}"
-  say "Open it in a browser to finish the setup (station position, admin password)."
+  code=$(docker compose exec -T app php bin/setup-code.php --quiet 2>/dev/null || true)
+  if [ -n "$code" ]; then
+    say "Open it in a browser to finish the setup (station position, admin password)."
+    say "Setup code asked by the wizard: ${code}"
+  fi
 else
   say "The app is not healthy yet. Check the logs with: docker compose logs app db"
   exit 1

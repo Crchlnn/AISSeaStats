@@ -86,9 +86,10 @@ Prefer to build the image yourself? `./install.sh --build`. **Allow 5 to 10 minu
 
 Then open `http://<pi-address>:8095` and the setup wizard asks for:
 
-1. the station name and antenna position (used for distances and range, never sent anywhere),
-2. the time zone and language,
-3. an admin password.
+1. the **setup code** shown at the end of `install.sh` (also in `docker compose logs app`, or with `docker compose exec app php bin/setup-code.php`): only the person running the server can become admin,
+2. the station name and antenna position (used for distances and range, never sent anywhere),
+3. the time zone and language,
+4. an admin password.
 
 If AIS-catcher runs in managed mode, the wizard can pre-fill the name and position from its `config.json` (read in your browser, never uploaded). It then shows your **ingestion token** and how to fill AIS-catcher's HTTP output.
 
@@ -100,6 +101,7 @@ curl -fsSLO https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/docker-co
 curl -fsSL https://raw.githubusercontent.com/Crchlnn/AISSeaStats/main/.env.example -o .env
 nano .env                  # set DB_PASSWORD and DB_ROOT_PASSWORD to long random values
 docker compose up -d
+docker compose exec app php bin/setup-code.php   # the code asked by the setup wizard
 ```
 
 Manual alternative from the cloned folder: `cp .env.example .env`, edit the passwords, then `docker compose up -d` (ready-made image) or `docker compose up -d --build` (built here).
@@ -198,6 +200,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.1.6 | 2026-10-21 | Security review fixes: login attempts limited, one-time setup code, photo look-ups only for received vessels, refused ingest posts no longer logged, strict `INGEST_ALLOW`, worker without root, option to round the published position, admin session timeout |
 | 1.1.5 | 2026-10-15 | Top routes drawn along their most typical real track instead of a straight line (rivers, fairways), with arrows of the same size at every zoom; no minimum length for the admin password |
 | 1.1.4 | 2026-10-13 | Traffic density map: range of the period and all-time range record drawn by direction, each one can be hidden; history after an update computed about 5 times faster, with its progress shown |
 | 1.1.3 | 2026-10-13 | Fix: an AIS-catcher batch could be lost with MariaDB 11.8 ("Record has changed since last read", issue #2), now retried; traffic density heatmap under the routes map (issue #3) |
@@ -288,10 +291,13 @@ Free photos are shown with author and licence and cached 30 days. Many fishing b
 ## Security
 
 - Designed for a home network. Do not expose it to the Internet without a reverse proxy with authentication and TLS.
-- Ingestion requires the token (HTTP Basic or Bearer), compared in constant time; payload size is capped; every query is parameterised.
-- The stats page is read-only. The admin uses a hashed password, CSRF tokens and `SameSite=Strict` cookies. A strict Content-Security-Policy is sent; JavaScript libraries are bundled.
-- Complete the setup wizard right after installing: until then, anyone on your network could do it.
-- `INGEST_ALLOW` in `.env` can restrict ingestion to given networks.
+- Ingestion requires the token (HTTP Basic or Bearer), compared in constant time; payload size is capped; every query is parameterised. Refused posts are not logged as batches.
+- The stats page is read-only and sets no cookie for visitors. The admin uses a hashed password, CSRF tokens and `SameSite=Strict` cookies; failed logins are limited (10 per address or 100 in total within 15 minutes, then refused for 15 minutes; `bin/reset-admin.php` lifts the lock), and an admin session ends after 8 hours without activity. A strict Content-Security-Policy is sent; JavaScript libraries are bundled.
+- The setup wizard asks for a one-time code that only the person running the server can see.
+- `INGEST_ALLOW` in `.env` can restrict ingestion to given networks (comma separated CIDRs such as `192.168.1.0/24`; an invalid entry is ignored and logged, never read as "everything"). Behind a reverse proxy, the address seen is the proxy's.
+- Admin → Station can round the position shown on the public page and API to about 1 km (useful when the antenna is at home and the page is public).
+- Vessel photos are looked up online only for vessels your station received, at most 30 a minute.
+- The background worker container runs as `www-data` without any Linux capability; the database port is not published.
 - Radio reception and redistribution of AIS data depend on local regulations.
 
 ## Development

@@ -13,6 +13,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use AISSeaStats\Db;
 use AISSeaStats\Ingest;
+use AISSeaStats\Net;
 use AISSeaStats\Settings;
 use AISSeaStats\Web;
 
@@ -35,14 +36,19 @@ if ($hash === '') {
 
 // Optional source allow-list (comma separated CIDRs) from the environment.
 $allow = trim(Db::env('INGEST_ALLOW', ''));
-if ($allow !== '' && !ip_allowed((string) ($_SERVER['REMOTE_ADDR'] ?? ''), $allow)) {
+if ($allow !== '' && !Net::ipAllowed((string) ($_SERVER['REMOTE_ADDR'] ?? ''), $allow)) {
     Web::json(['error' => 'forbidden'], 403);
 }
 
 $token = presented_token();
 if ($token === null || !hash_equals($hash, hash('sha256', $token))) {
-    usleep(250000);
-    log_batch(null, 0, 0, 0, $started, $token === null ? 'missing token' : 'token rejected');
+    // 1.1.6: refused posts are not logged as batches (anyone could fill the log or fake the health figures).
+    // The admin still sees the last refusal, to spot a wrong token in AIS-catcher: one write a minute at most.
+    // No delay: a 192-bit token cannot be guessed, and a pause would only hold a PHP worker.
+    $last = Settings::get('ingest_rejected');
+    if (!is_array($last) || (int) ($last['ts'] ?? 0) < time() - 60) {
+        Settings::set('ingest_rejected', ['ts' => time(), 'error' => $token === null ? 'missing token' : 'token rejected']);
+    }
     header('WWW-Authenticate: Basic realm="AISSeaStats ingest"');
     Web::json(['error' => 'unauthorized'], 401);
 }
@@ -88,32 +94,6 @@ function presented_token(): ?string
         return (string) $_SERVER['PHP_AUTH_PW'];
     }
     return null;
-}
-
-function ip_allowed(string $ip, string $list): bool
-{
-    foreach (explode(',', $list) as $cidr) {
-        $cidr = trim($cidr);
-        if ($cidr === '') {
-            continue;
-        }
-        [$net, $bits] = array_pad(explode('/', $cidr, 2), 2, null);
-        $ipBin = @inet_pton($ip);
-        $netBin = @inet_pton((string) $net);
-        if ($ipBin === false || $netBin === false || strlen($ipBin) !== strlen($netBin)) {
-            continue;
-        }
-        $bits = $bits === null ? strlen($ipBin) * 8 : (int) $bits;
-        $bytes = intdiv($bits, 8);
-        $rem = $bits % 8;
-        if (substr($ipBin, 0, $bytes) !== substr($netBin, 0, $bytes)) {
-            continue;
-        }
-        if ($rem === 0 || ((ord($ipBin[$bytes]) ^ ord($netBin[$bytes])) & (0xFF << (8 - $rem)) & 0xFF) === 0) {
-            return true;
-        }
-    }
-    return false;
 }
 
 function log_batch(?string $station, int $bytes, int $msgs, int $accepted, float $started, ?string $error): void
