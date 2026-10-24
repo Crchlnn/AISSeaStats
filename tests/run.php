@@ -15,7 +15,10 @@ use AISSeaStats\Geo;
 use AISSeaStats\Ingest;
 use AISSeaStats\LoginGuard;
 use AISSeaStats\Migrator;
+use AISSeaStats\Mqtt;
+use AISSeaStats\MqttPublisher;
 use AISSeaStats\Net;
+use AISSeaStats\Notify;
 use AISSeaStats\Rules;
 use AISSeaStats\Settings;
 use AISSeaStats\Stats;
@@ -547,6 +550,175 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     $hm = Stats::heatmap($t0, $utc);
     check('heatmap by weekday and hour', $hm['hours'] === 45 && $hm['cells'][0][0] === 3.0 && $hm['cells'][0][5] === null
         && $hm['cells'][1][5] === 3.0 && $hm['cells'][2][0] === null && $hm['max'] === 3.0);
+    // Records, signal by distance, constellation (1.2.0).
+    $rec = AISSeaStats\Insights::records(Settings::timezone());
+    check('records', is_array($rec['furthest']) && $rec['furthest']['dist'] > 0 && is_array($rec['first']) && $rec['since'] > 0
+        && array_key_exists('busiest_day', $rec) && ($rec['fastest'] === null || $rec['fastest']['speed'] <= 60));
+    Db::pdo()->exec('TRUNCATE TABLE signal_band');
+    Db::run("INSERT INTO signal_band (day, bin, octant, n, sig_sum, sig_min, sig_max) VALUES
+        ('2030-01-01', 0, 0, 10, -100, -15, -5), ('2030-01-01', 0, 2, 10, -200, -25, -15), ('2030-01-01', 5, 0, 2, -60, -31, -29)");
+    $sg = AISSeaStats\Insights::signal('2030-01-01');
+    check('signal by distance', count($sg['bins']) === 1 && $sg['bins'][0]['d'] === 1.0 && $sg['bins'][0]['avg'] === -15.0
+        && $sg['bins'][0]['min'] === -25.0 && $sg['bins'][0]['n'] === 20 && $sg['sectors'][2][0]['avg'] === -20.0 && $sg['sectors'][1] === []);
+    Db::pdo()->exec('TRUNCATE TABLE signal_band');
+    Db::pdo()->exec('TRUNCATE TABLE destination_change');
+    $dcTs = time();
+    Db::run("INSERT INTO destination_change (ts, mmsi, old_dest, new_dest) VALUES (?, 244030470, 'FR SML', 'JEJER'), (?, 227000001, 'FRSML', 'JE JER'),
+        (?, 227000001, 'JEJER', 'FRSML'), (?, 227000002, '0', 'JEJER')", [$dcTs, $dcTs, $dcTs, $dcTs]);
+    $pt = AISSeaStats\Insights::ports($dcTs - 10, 10);
+    $l0 = $pt['links'][0] ?? [];
+    check('ports network', count($pt['nodes']) === 2 && $pt['since'] === $dcTs && count($pt['links']) === 2
+        && $l0['from'] === 'FRSML' && $l0['to'] === 'JEJER' && $l0['n'] === 2);
+    check('ports link vessels', count(AISSeaStats\Insights::linkVessels('FRSML', 'JEJER', $dcTs - 10)) === 2);
+    Db::pdo()->exec('TRUNCATE TABLE destination_change');
+    $dst = AISSeaStats\Insights::destinations(0, 10);
+    check('destinations constellation', $dst['mode'] === 'dest' && $dst['nodes'] !== [] && isset($dst['nodes'][0]['types'][0]['cat'])
+        && !in_array('?', array_column($dst['nodes'], 'key'), true) && AISSeaStats\Insights::destinations(0, 7)['top'] === 20);
+
+    // Vessel alerts and summaries (1.2.0).
+    $sent = [];
+    Alert::$http = static function (string $url, string $body, array $headers, string $method) use (&$sent): array {
+        $sent[] = [$url, json_decode($body, true), $method];
+        return [200, 'ok'];
+    };
+    $keepAlerts = Settings::get('alerts');
+    $keepUrl = Settings::get('public_url');
+    Settings::set('alerts', Alert::fromForm(['ntfy_url' => 'https://ntfy.sh', 'ntfy_topic' => 'ais-v', 'webhook_url' => 'https://hooks.example/v'],
+        Alert::defaults(), 'fr'));
+    Settings::set('public_url', 'https://ais.example.org/');
+    Settings::set('mqtt', ['enabled' => false]);
+    $form = ['notify_vessel' => '1', 'trig_watchlist' => '1', 'trig_military' => '1', 'trig_emergency' => '1', 'trig_range_record' => '1',
+        'route_reception_ntfy' => '1', 'route_vessel_ntfy' => '1', 'route_vessel_webhook' => '1', 'route_summary_webhook' => '1',
+        'quiet_from' => '22:00', 'quiet_to' => '7:30', 'max_per_hour' => '10', 'sum_daily_at' => '20:00', 'sum_weekly_day' => '7', 'sum_weekly_at' => '20:00'];
+    $nc = Notify::fromForm($form);
+    check('notify form', $nc['vessel_enabled'] && $nc['triggers']['military'] && !$nc['triggers']['yacht'] && $nc['quiet']['to'] === '07:30'
+        && $nc['routes']['vessel'] === ['ntfy', 'webhook'] && $nc['routes']['summary'] === ['webhook']);
+    $bad = false;
+    try { Notify::fromForm(['quiet_from' => '25:00'] + $form); } catch (InvalidArgumentException $e) { $bad = $e->getMessage() === 'quiet_from'; }
+    check('notify form rejects a bad time', $bad);
+    Settings::set('notify', $nc);
+    $ac = Alert::config();
+    check('notify channels per kind', Notify::channels('vessel', $ac) === ['ntfy', 'webhook'] && Notify::channels('summary', $ac) === ['webhook']
+        && Notify::channels('reception', $ac) === ['ntfy'] && Notify::channels('test', $ac) === ['ntfy', 'webhook']);
+    check('quiet hours across midnight', Notify::inQuiet('22:00', '07:00', '23:10') && Notify::inQuiet('22:00', '07:00', '06:59')
+        && !Notify::inQuiet('22:00', '07:00', '07:00') && Notify::inQuiet('13:00', '14:00', '13:30') && !Notify::inQuiet('08:00', '08:00', '08:00'));
+    check('type categories as on the page', Notify::typeCat(35, 'A') === 'military' && Notify::typeCat(0, 'EMRG') === 'emergency'
+        && Notify::typeCat(74, 'A') === 'cargo' && Notify::typeCat(0, 'B') === 'unknown');
+    Db::pdo()->exec('TRUNCATE TABLE vessel_alert');
+    $nNow = time();
+    Db::run("INSERT INTO vessel (mmsi, name, shiptype, vclass, country, length_m, destination, tags, first_seen, last_seen, cur_passage_id, last_lat, last_lon)
+             VALUES (900000101, 'TEST WARSHIP', 35, 'A', 'FR', 140, 'BREST', 'military', ?, ?, 555, 52.0, 4.2),
+                    (970000101, NULL, 0, 'EMRG', NULL, NULL, NULL, 'emergency', ?, ?, 556, 51.95, 4.4),
+                    (900000102, 'PLAIN', 70, 'A', 'NL', 120, NULL, '', ?, ?, 557, 51.9, 4.3)
+             ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen), tags = VALUES(tags), cur_passage_id = VALUES(cur_passage_id)",
+        [$nNow - 30 * 86400, $nNow, $nNow - 30 * 86400, $nNow, $nNow - 30 * 86400, $nNow]);
+    $sent = [];
+    check('vessel alerts sent once', Notify::vessels($nc, $ac, $nNow - 60, $nNow) === 2 && count($sent) === 4
+        && Notify::vessels($nc, $ac, $nNow - 60, $nNow) === 0 && count($sent) === 4);
+    $hook = array_values(array_filter($sent, static fn ($s) => str_contains($s[0], 'hooks.example') && ($s[1]['mmsi'] ?? 0) === 900000101))[0][1] ?? [];
+    $ntfy = array_values(array_filter($sent, static fn ($s) => str_contains($s[0], 'ntfy.sh') && str_contains($s[1]['title'] ?? '', 'WARSHIP')))[0][1] ?? [];
+    check('vessel alert payloads', ($hook['kind'] ?? '') === 'vessel' && ($hook['triggers'] ?? []) === ['military'] && ($hook['url'] ?? '') === 'https://ais.example.org/?mmsi=900000101'
+        && str_contains((string) ($hook['message'] ?? ''), 'BREST') && ($ntfy['click'] ?? '') === 'https://ais.example.org/?mmsi=900000101'
+        && ($ntfy['tags'] ?? []) === ['ship']);
+    check('vessel alert logged per trigger and passage', (int) Db::value("SELECT COUNT(*) FROM vessel_alert WHERE mmsi = 900000101 AND trig = 'military' AND passage_id = 555 AND results = 'ok'") === 1);
+    Db::run('UPDATE vessel SET cur_passage_id = 600 WHERE mmsi = 900000101');
+    check('new passage alerts again', Notify::vessels($nc, $ac, $nNow - 60, $nNow + 60) === 1);
+    $quiet = $nc;
+    $quiet['quiet'] = ['enabled' => true, 'from' => '00:00', 'to' => '23:59'];
+    Db::run('UPDATE vessel SET cur_passage_id = cur_passage_id + 100 WHERE mmsi IN (900000101, 970000101)');
+    $sent = [];
+    $q = Notify::vessels($quiet, $ac, $nNow - 60, $nNow + 120);
+    $now2 = (new DateTimeImmutable('@' . ($nNow + 120)))->setTimezone(Settings::timezone())->format('H:i');
+    check('quiet hours hold all but distress', $now2 === '23:59' || ($q === 1 && count($sent) === 2
+        && (int) Db::value("SELECT COUNT(*) FROM vessel_alert WHERE mmsi = 900000101 AND results = 'quiet'") === 1));
+    $cap = $nc;
+    $cap['max_per_hour'] = 1;
+    Db::run('UPDATE vessel SET cur_passage_id = cur_passage_id + 100 WHERE mmsi = 900000101');
+    check('hourly cap', Notify::vessels($cap, $ac, $nNow - 60, $nNow + 180) === 0
+        && (int) Db::value("SELECT COUNT(*) FROM vessel_alert WHERE results = 'capped'") === 1);
+    // Range record: first value stored silently, then alerted at most every 30 minutes with the best value.
+    Db::pdo()->exec('TRUNCATE TABLE range_polar');
+    $day = Settings::localDay($nNow);
+    Db::run('INSERT INTO range_polar (day, sector, max_dist_nm, mmsi, ts) VALUES (?, 4, 40.0, 900000101, ?)', [$day, $nNow]);
+    $st = Notify::rangeRecord($nc, $ac, Notify::state() + ['record' => null], $nNow);
+    $st['record'] = 40.0;
+    $sent = [];
+    Db::run('UPDATE range_polar SET max_dist_nm = 55.5 WHERE sector = 4');
+    $st2 = Notify::rangeRecord($nc, $ac, $st, $nNow + 600);
+    $st3 = Notify::rangeRecord($nc, $ac, $st2, $nNow + 1900);
+    check('range record alert', $st2['record_alerted'] === 40.0 && $sent !== [] && count($sent) === 2 && $st3['record_alerted'] === 55.5
+        && str_contains((string) $sent[0][1]['title'], '55,5') && ($sent[1][1]['trigger'] ?? '') === 'range_record');
+    $first = Notify::rangeRecord($nc, $ac, ['record' => null, 'record_alerted' => null, 'record_ts' => 0] + Notify::state(), $nNow);
+    check('first record stored silently', $first['record'] === 55.5 && count($sent) === 2);
+    // Summaries: on webhook only, with the day's figures; daily at the set time, once.
+    $sent = [];
+    $local = (new DateTimeImmutable('@' . $nNow))->setTimezone(Settings::timezone());
+    $res = Notify::sendSummary($ac, 'daily', $local->setTime(0, 0), $local, $nNow);
+    check('summary sent on its channels', $res === ['webhook' => null] && count($sent) === 1 && ($sent[0][1]['kind'] ?? '') === 'summary'
+        && ($sent[0][1]['data']['range'] ?? null) === 55.5 && str_contains((string) $sent[0][1]['message'], 'https://ais.example.org'));
+    $sum = $nc;
+    $sum['summary']['daily'] = true;
+    $sum['summary']['daily_at'] = '00:00';
+    $sent = [];
+    $s1 = Notify::summaries($sum, $ac, Notify::state(), $nNow);
+    $s2 = Notify::summaries($sum, $ac, $s1, $nNow + 60);
+    check('daily summary once a day', count($sent) === 1 && $s2['daily_last'] === $local->format('Y-m-d'));
+    check('notify log grouped', count(Notify::log()) >= 4 && Notify::log(1)[0]['trigs'] !== '');
+    Db::run('DELETE FROM vessel WHERE mmsi IN (900000101, 970000101, 900000102)');
+    Db::pdo()->exec('TRUNCATE TABLE vessel_alert');
+    Settings::set('alerts', $keepAlerts);
+    Settings::set('public_url', $keepUrl);
+    Settings::set('notify', null);
+    Settings::set('notify_state', null);
+    Alert::$http = null;
+
+    // MQTT against a real broker when one is given (CI: Mosquitto on 127.0.0.1:1883).
+    $mqHost = getenv('MQTT_TEST_HOST') ?: '';
+    if ($mqHost !== '') {
+        $mqPort = (int) (getenv('MQTT_TEST_PORT') ?: 1883);
+        $mc = MqttPublisher::fromForm(['mqtt_enabled' => '1', 'mqtt_host' => $mqHost, 'mqtt_port' => (string) $mqPort, 'mqtt_discovery' => '1',
+            'mqtt_tls_verify' => '1'], MqttPublisher::defaults());
+        check('mqtt test publish', MqttPublisher::test($mc) === null);
+        check('mqtt refused port reported', str_contains((string) MqttPublisher::test(['port' => 1] + $mc), 'cannot connect'));
+        Settings::set('mqtt', $mc);
+        $pub = new MqttPublisher();
+        MqttPublisher::$current = $pub;
+        $pub->tick(time());
+        MqttPublisher::event(['event' => 'test', 'kind' => 'test', 'title' => 'unit test']);
+        $mst = Settings::get('mqtt_status');
+        check('mqtt worker tick', is_array($mst) && $mst['error'] === null);
+        // Read back the retained state with a second client: subscribe is not in Mqtt, so use a raw socket.
+        $fp = stream_socket_client('tcp://' . $mqHost . ':' . $mqPort, $en, $es, 5);
+        $pk = static fn (int $h, string $b): string => chr($h) . Mqtt::remainingLength(strlen($b)) . $b;
+        fwrite($fp, $pk(0x10, Mqtt::str('MQTT') . chr(4) . chr(2) . pack('n', 30) . Mqtt::str('aisseastats-test-sub')));
+        fread($fp, 4);
+        fwrite($fp, $pk(0x82, pack('n', 1) . Mqtt::str(MqttPublisher::base($mc) . '/state') . chr(0)));
+        stream_set_timeout($fp, 3);
+        $buf = '';
+        $end = microtime(true) + 3;
+        while (microtime(true) < $end && !str_contains($buf, '"reception"')) {
+            $chunk = fread($fp, 8192);
+            if ($chunk === false || $chunk === '') { break; }
+            $buf .= $chunk;
+        }
+        fclose($fp);
+        check('mqtt retained state', str_contains($buf, '"vessels_today"') && str_contains($buf, '"reception"'));
+        $disc = MqttPublisher::discovery($mc);
+        $one = json_decode((string) reset($disc), true);
+        check('mqtt discovery', count($disc) === 9 && str_starts_with((string) key($disc), 'homeassistant/sensor/aisseastats_')
+            && ($one['availability_topic'] ?? '') === MqttPublisher::base($mc) . '/availability' && ($one['expire_after'] ?? 0) === 600);
+        Settings::set('mqtt', ['enabled' => false]);
+        $pub->tick(time()); // goes offline cleanly
+        MqttPublisher::$current = null;
+    }
+    check('mqtt topic rules', Mqtt::validTopic('a/b-c') && !Mqtt::validTopic('a/#') && !Mqtt::validTopic('a/+/b') && !Mqtt::validTopic('')
+        && Mqtt::remainingLength(0) === "\0" && Mqtt::remainingLength(321) === "\xC1\x02" && Mqtt::remainingLength(2097152) === "\x80\x80\x80\x01");
+    $badHost = false;
+    try { MqttPublisher::fromForm(['mqtt_enabled' => '1', 'mqtt_host' => 'evil host;'], MqttPublisher::defaults()); } catch (InvalidArgumentException $e) { $badHost = $e->getMessage() === 'mqtt_host'; }
+    $kept = MqttPublisher::fromForm(['mqtt_host' => 'broker.lan', 'mqtt_pass' => ''], ['pass' => 'secret'] + MqttPublisher::defaults());
+    check('mqtt form', $badHost && $kept['pass'] === 'secret' && $kept['port'] === 1883
+        && MqttPublisher::fromForm(['mqtt_host' => 'b', 'mqtt_tls' => '1', 'mqtt_pass_clear' => '1'], ['pass' => 's'] + MqttPublisher::defaults())['port'] === 8883
+        && MqttPublisher::fromForm(['mqtt_host' => 'b', 'mqtt_pass_clear' => '1'], ['pass' => 's'] + MqttPublisher::defaults())['pass'] === '');
 }
 
 echo "{$pass} passed, {$fail} failed\n";

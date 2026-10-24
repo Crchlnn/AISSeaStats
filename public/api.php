@@ -11,9 +11,12 @@ require __DIR__ . '/../src/bootstrap.php';
 use AISSeaStats\Db;
 use AISSeaStats\Destinations;
 use AISSeaStats\Enrich;
+use AISSeaStats\Insights;
 use AISSeaStats\Settings;
 use AISSeaStats\Stats;
 use AISSeaStats\Web;
+
+const API_MAX_QUERY_S = 20;
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
     Web::json(['error' => 'GET only'], 405);
@@ -22,6 +25,9 @@ try {
     if (!Settings::get('setup_done')) {
         Web::json(['error' => 'setup required'], 503);
     }
+    // 1.2.0: the public API is unauthenticated; no single query may hold the database longer than this.
+    // (MariaDB max_statement_time, in seconds; a busy year on a Raspberry Pi stays well below.)
+    Db::pdo()->exec('SET SESSION max_statement_time = ' . API_MAX_QUERY_S);
 } catch (Throwable) {
     Web::json(['error' => 'database unavailable'], 503);
 }
@@ -84,6 +90,13 @@ try {
             Web::json(photo((int) ($_GET['mmsi'] ?? 0)), 200, 300);
         case 'list':
             Web::json(vesselList((string) ($_GET['by'] ?? ''), $sinceDay, $sinceTs), 200, 30);
+        case 'records':
+            Web::json(Insights::records($tz), 200, 300);
+        case 'signal':
+            Web::json(['days' => $days] + Insights::signal($sinceDay->format('Y-m-d')), 200, 300);
+        case 'constellation':
+            $top = (int) ($_GET['top'] ?? 20);
+            Web::json(($_GET['mode'] ?? '') === 'ports' ? Insights::ports($sinceTs, $top) : Insights::destinations($sinceTs, $top), 200, 120);
         case 'search':
             Web::json(search((string) ($_GET['s'] ?? '')), 200, 10);
         default:
@@ -463,8 +476,29 @@ function vesselList(string $by, DateTimeImmutable $sinceDay, int $sinceTs): arra
             $value = (string) ($_GET['value'] ?? '');
             $key = $value === Destinations::UNKNOWN ? $value : strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $value));
             [$dkey, $dparams] = Destinations::sql();
+            // 1.2.0: one type of vessel going to that destination (constellation).
+            $cat = (string) ($_GET['type'] ?? '');
+            $typeSql = '';
+            if ($cat !== '') {
+                if ($cat === 'other') {
+                    $typeSql = ' AND NOT (' . implode(' OR ', array_map(static fn ($w) => '(' . $w . ')', array_values(TYPE_CATS)))
+                        . ") AND v.vclass NOT IN ('SAR', 'EMRG')";
+                } elseif ($cat === 'emergency' || $cat === 'sar_aircraft') {
+                    $typeSql = " AND v.vclass = '" . ($cat === 'emergency' ? 'EMRG' : 'SAR') . "'";
+                } elseif (isset(TYPE_CATS[$cat])) {
+                    $typeSql = ' AND ' . TYPE_CATS[$cat] . " AND v.vclass NOT IN ('SAR', 'EMRG')";
+                } else {
+                    Web::json(['error' => 'unknown type'], 400);
+                }
+                $typeSql .= ' AND v.vclass NOT IN ' . INFRA;
+            }
             $rows = Db::all("SELECT {$cols}, v.destination FROM vessel v WHERE v.last_seen >= ? AND destination IS NOT NULL
-                AND destination <> '' AND {$dkey} = ? ORDER BY v.last_seen DESC LIMIT 300", array_merge([$sinceTs], $dparams, [$key]));
+                AND destination <> '' AND {$dkey} = ?{$typeSql} ORDER BY v.last_seen DESC LIMIT 300", array_merge([$sinceTs], $dparams, [$key]));
+            break;
+        case 'link':
+            // One link of the ports network (1.2.0).
+            $clean = static fn (string $k): string => $k === Destinations::UNKNOWN ? $k : strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $k));
+            $rows = Insights::linkVessels($clean((string) ($_GET['from'] ?? '')), $clean((string) ($_GET['to'] ?? '')), $sinceTs);
             break;
         case 'hour':
             // One bar of the 48 h chart (hourly detail is kept 35 days).

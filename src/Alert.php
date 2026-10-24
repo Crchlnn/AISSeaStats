@@ -5,7 +5,8 @@ namespace AISSeaStats;
 
 /**
  * "No data" alerts: when no AIS message has been received for N minutes, one alert is sent
- * to every configured channel (ntfy, Telegram, webhook, e-mail); when messages come back,
+ * to the configured channels (ntfy, Telegram, webhook, e-mail, MQTT since 1.2.0, see Notify for the
+ * channels of each kind of message); when messages come back,
  * one "reception restored" message follows. An optional heartbeat URL (Uptime Kuma,
  * healthchecks.io…) is called while reception is fine, to detect a station that is off.
  */
@@ -140,6 +141,7 @@ final class Alert
     }
 
     /**
+     * "No data" / "restored" / test message (reception kind).
      * @param array<string, mixed> $cfg
      * @return array<string, string|null> channel => null on success, error text otherwise
      */
@@ -149,20 +151,33 @@ final class Alert
             I18n::setLang((string) $cfg['lang']);
         }
         [$title, $text] = self::compose($event, $last, $now, $since);
-        $priority = $event === 'down' ? 4 : 3;
+        return self::deliver($cfg, $event === 'test' ? 'test' : 'reception', $event, $title, $text, $event === 'down' ? 4 : 3,
+            ['last_message' => $last ?: null, 'down_since' => $since ?: null]);
+    }
+
+    /**
+     * Send one message to the channels of its kind (1.2.0: reception, vessel, summary; "test" = every channel set up).
+     * @param array<string, mixed> $cfg alerts configuration (channels)
+     * @param array<string, mixed> $extra fields added to the webhook and MQTT payloads ("url" also makes the ntfy click link)
+     * @return array<string, string|null> channel => null on success, error text otherwise
+     */
+    public static function deliver(array $cfg, string $kind, string $event, string $title, string $text, int $priority, array $extra = []): array
+    {
         $results = [];
-        foreach (self::configured($cfg) as $ch) {
+        foreach (Notify::channels($kind, $cfg) as $ch) {
             try {
                 match ($ch) {
-                    'ntfy' => self::ntfy($cfg['ntfy'], $title, $text, $priority, $event),
+                    'ntfy' => self::ntfy($cfg['ntfy'], $title, $text, $priority, $event, (string) ($extra['url'] ?? '')),
                     'telegram' => self::telegram($cfg['telegram'], $title, $text),
-                    'webhook' => self::webhook($cfg['webhook'], $title, $text, $priority, $event, $last, $since),
+                    'webhook' => self::webhook($cfg['webhook'], $title, $text, $priority, $event, $kind, $extra),
                     'email' => self::email($cfg['email'], $title, $text),
+                    'mqtt' => MqttPublisher::event(['event' => $event, 'kind' => $kind, 'title' => $title, 'message' => $text,
+                        'priority' => $priority] + $extra),
                 };
                 $results[$ch] = null;
             } catch (\Throwable $e) {
                 $results[$ch] = mb_substr($e->getMessage(), 0, 300);
-                error_log('[aisseastats] alert ' . $ch . ': ' . $e->getMessage());
+                error_log('[aisseastats] ' . $kind . ' ' . $ch . ': ' . $e->getMessage());
             }
         }
         return $results;
@@ -196,15 +211,20 @@ final class Alert
     }
 
     /** @param array<string, string> $c */
-    private static function ntfy(array $c, string $title, string $text, int $priority, string $event): void
+    private static function ntfy(array $c, string $title, string $text, int $priority, string $event, string $url = ''): void
     {
         // JSON publishing: UTF-8 title and text without header encoding issues.
         $headers = ['Content-Type: application/json'];
         if ($c['token'] !== '') {
             $headers[] = 'Authorization: Bearer ' . $c['token'];
         }
-        $body = json_encode(['topic' => $c['topic'], 'title' => $title, 'message' => $text, 'priority' => $priority,
-            'tags' => [$event === 'down' ? 'warning' : ($event === 'up' ? 'white_check_mark' : 'bell')]], JSON_UNESCAPED_UNICODE);
+        $msg = ['topic' => $c['topic'], 'title' => $title, 'message' => $text, 'priority' => $priority,
+            'tags' => [match ($event) { 'down' => 'warning', 'up' => 'white_check_mark', 'vessel' => 'ship', 'record' => 'trophy',
+                'propagation' => 'satellite', 'summary' => 'bar_chart', default => 'bell' }]];
+        if ($url !== '') {
+            $msg['click'] = $url;
+        }
+        $body = json_encode($msg, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         self::expectOk(self::http(rtrim($c['url'], '/') . '/', (string) $body, $headers));
     }
 
@@ -219,8 +239,8 @@ final class Alert
         }
     }
 
-    /** @param array<string, string> $c */
-    private static function webhook(array $c, string $title, string $text, int $priority, string $event, int $last, int $since): void
+    /** @param array<string, string> $c @param array<string, mixed> $extra */
+    private static function webhook(array $c, string $title, string $text, int $priority, string $event, string $kind, array $extra): void
     {
         // One payload readable by the common receivers: Slack/Mattermost ("text"), Discord ("content"),
         // Gotify ("title", "message", "priority"), Home Assistant and n8n (any JSON).
@@ -228,8 +248,7 @@ final class Alert
         $body = json_encode([
             'event' => $event, 'station' => (string) Settings::get('station_name'),
             'title' => $title, 'message' => $text, 'text' => $full, 'content' => $full, 'priority' => $priority,
-            'last_message' => $last ?: null, 'down_since' => $since ?: null,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        ] + $extra + ['kind' => $kind], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         self::expectOk(self::http($c['url'], (string) $body, ['Content-Type: application/json']));
     }
 

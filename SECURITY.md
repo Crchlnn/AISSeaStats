@@ -11,7 +11,8 @@ You should get an answer within a week.
 ## Scope notes
 
 - Exposing the app to the Internet is not a supported setup without a reverse proxy
-  that adds TLS (and ideally authentication in front of the admin page).
+  that adds TLS (and ideally authentication in front of the admin page). See "Exposing to the Internet" in the README.
+- Public API: each database query is stopped after 20 seconds (MariaDB `max_statement_time`).
 - Secrets: the ingestion token is stored as a SHA-256 hash and compared in constant time; the admin password
   with `password_hash()`. Alert secrets (Telegram token, SMTP password…) are never sent back to the browser.
 - Admin login: failed attempts are limited per address and in total (refused for 15 minutes past the limit);
@@ -22,7 +23,9 @@ You should get an answer within a week.
   and logged). Behind a reverse proxy, the address seen is the proxy's.
 - Outbound network calls, all optional: vessel photo look-ups (Wikimedia Commons, Wikidata, at most 30 a minute,
   only for vessels the station received) and the alert channels configured by the admin (ntfy, Telegram,
-  webhook, SMTP e-mail, heartbeat URL). Map tiles are loaded by the visitor's browser, not by the server.
+  webhook, SMTP e-mail, heartbeat URL) and MQTT (TLS certificate checked unless the admin turns it off).
+  Alert messages carry public AIS data and the station name, never the station position. Map tiles are loaded by the visitor's browser, not by the server.
 - The public page and API show the station position; the admin can round it to about 1 km.
 - Containers: the web server and PHP workers run as `www-data`; the background worker runs as `www-data`
-  without Linux capabilities. The database port is not published.
+  without Linux capabilities. The database port is not published. `docker-compose.hardened.yml` (optional)
+  also drops the web container's capabilities except SETUID, SETGID and KILL.

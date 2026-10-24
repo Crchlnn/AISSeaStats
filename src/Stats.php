@@ -21,6 +21,35 @@ final class Stats
     /** Regulars: at least 4 passages (3 intervals) in the period. */
     public const REGULAR_MIN_GAPS = 3;
 
+    /**
+     * Live figures of the station (1.2.0), for MQTT / Home Assistant sensors: vessels seen today (station day),
+     * vessels heard in the last 15 minutes, new vessels today, messages today and in the last hour, range today and
+     * all-time record (NM), age of the last message (s), reception state (messages within the alert delay).
+     * @return array<string, int|float|string|null>
+     */
+    public static function live(int $now, \DateTimeZone $tz): array
+    {
+        $today = (new \DateTimeImmutable('@' . $now))->setTimezone($tz)->setTime(0, 0);
+        $d = $today->format('Y-m-d');
+        $infra = "('BASE','ATON')";
+        $last = (int) Db::value('SELECT MAX(last_seen) FROM vessel');
+        $after = max(5, min(1440, (int) (Alert::config()['after_min'] ?? 30))) * 60;
+        $rangeToday = Db::value('SELECT MAX(max_dist_nm) FROM range_polar WHERE day = ?', [$d]);
+        $record = Db::value('SELECT MAX(max_dist_nm) FROM range_polar');
+        return [
+            'vessels_today' => (int) Db::value('SELECT COUNT(DISTINCT mmsi) FROM vessel_daily WHERE day = ?', [$d]),
+            'active_now' => (int) Db::value("SELECT COUNT(*) FROM vessel WHERE last_seen >= ? AND vclass NOT IN {$infra}", [$now - 900]),
+            'new_today' => (int) Db::value("SELECT COUNT(*) FROM vessel WHERE first_seen >= ? AND vclass NOT IN {$infra}", [$today->getTimestamp()]),
+            'msgs_today' => (int) Db::value('SELECT COALESCE(SUM(msgs), 0) FROM msgtype_daily WHERE day = ?', [$d]),
+            'msgs_hour' => (int) Db::value('SELECT COALESCE(SUM(accepted), 0) FROM ingest_log WHERE ts >= ? AND error IS NULL', [$now - 3600]),
+            'range_today' => $rangeToday !== null ? round((float) $rangeToday, 1) : null,
+            'range_record' => $record !== null ? round((float) $record, 1) : null,
+            'last_message_age' => $last > 0 ? max(0, $now - $last) : null,
+            'reception' => $last > 0 && $now - $last < $after ? 'ON' : 'OFF',
+            'ts' => $now,
+        ];
+    }
+
     /** Page sizes of the Top vessels and Regulars cards (1.1.2). */
     public const PAGE_SIZES = [10, 20, 50, 100];
     private const MAX_PAGE = 10000;

@@ -1,6 +1,6 @@
 # AISSeaStats 1.2.0 — Note de cadrage
 
-*Version 0.3 — 21 octobre 2026 — validée*
+*Version 0.5 — 22 octobre 2026 — validée : durcissement de la seconde revue ajouté, plan en deux étapes*
 
 La 1.2.0 fait sortir AISSeaStats de sa page : les statistiques et les événements remarquables vont là où l'utilisateur regarde déjà (Home Assistant, téléphone, messagerie). Elle ajoute aussi une nouvelle façon de lire le trafic : une vue en bulles et en liens, de type carte mentale.
 
@@ -16,14 +16,16 @@ La 1.2.0 fait sortir AISSeaStats de sa page : les statistiques et les événemen
 | Adresse publique | **Paramètre optionnel dans l'admin**, pour mettre un lien vers la fiche navire dans les alertes |
 | Alertes par défaut | Liste de surveillance, secours/urgence, militaire et nouveau record de portée actifs ; les autres déclencheurs désactivés |
 | Heure des résumés | 20 h pour le quotidien, dimanche 20 h pour l'hebdomadaire (modifiables) |
+| Seconde revue de sécurité (22 octobre) | Ses 5 améliorations retenues entrent dans la 1.2.0, sans urgence (§7.1) |
+| Étapes (22 octobre) | **1.2.0-beta.1** avec tout le périmètre (sans étiquette `latest`), puis **1.2.0** une à deux semaines plus tard (§8) |
 
-## 2. Point de départ (1.0 → 1.1.5)
+## 2. Point de départ (1.0 → 1.1.6)
 
 Acquis : compteurs par tranche de distance, jours de propagation, habitués, heures d'affluence, réception de la station, densité du trafic avec portée, top routes le long des trajets réels, alertes de réception (ntfy, Telegram, webhook, e-mail), image Docker toute prête, pagination, tri et filtres.
 
 Retours des utilisateurs à traiter : MQTT pour Home Assistant (demande Discord), alertes sur les navires et non seulement sur la station, préfixes MMSI militaires peu fiables.
 
-## 3. Prérequis : 1.1.6 sécurité
+## 3. Prérequis : 1.1.6 sécurité (publiée)
 
 Avant la 1.2.0, publier une 1.1.6 avec le plan de la revue de sécurité du 21 octobre 2026 : limitation des tentatives de connexion admin, pas de recherche de photo pour un navire inconnu, envois refusés non journalisés, contrôle strict d'`INGEST_ALLOW`, worker en `www-data` et conteneurs durcis, option d'arrondi de la position publiée, code d'installation à usage unique, finitions. La 1.2.0 ajoute des connexions sortantes (MQTT) : mieux vaut partir d'une base durcie.
 
@@ -37,6 +39,7 @@ Avant la 1.2.0, publier une 1.1.6 avec le plan de la revue de sécurité du 21 o
 | Résumé périodique | Bilan du jour ou de la semaine par les canaux d'alerte | 3 |
 | Records | Tableau d'honneur de la station | 3 |
 | Signal et distance | Qualité de réception selon la distance | 3 |
+| Durcissement | Améliorations de la seconde revue de sécurité (§7.1) | 2 |
 
 ### 4.1 MQTT et Home Assistant
 
@@ -86,7 +89,7 @@ Objectif : une vue « carte mentale » qui donne envie d'explorer, comme la figu
 
 Décision : **A et B** dans la 1.2.0, dans la même carte avec un sélecteur « Destinations / Ports ». **C** plus tard, en curiosité.
 
-Pour B, l'historique des destinations n'existe pas encore : sa collecte démarre dès la 1.2.0-beta.1, pour que la vue ait quelques semaines de données à la sortie de la 1.2.0. Tant que l'historique est court, la vue l'indique (« ports reliés depuis le … »).
+Pour B, l'historique des destinations n'existe pas encore : sa collecte démarre avec la 1.2.0-beta.1, pour que la vue ait une à deux semaines de données à la sortie de la 1.2.0. Tant que l'historique est court, la vue l'indique (« ports reliés depuis le … »).
 
 ### 5.2 Lecture et interactions
 
@@ -127,15 +130,36 @@ Aucune donnée existante n'est modifiée ; tout est appliqué automatiquement, c
 - Les messages d'alerte ne contiennent que des données AIS publiques et le nom de la station, jamais sa position exacte.
 - Plafonds contre les rafales d'alertes et de publications.
 
+### 7.1 Durcissement issu de la seconde revue (22 octobre 2026)
+
+Revue statique externe de la 1.1.6 : aucune faille exploitable confirmée ; 7 points, dont 5 retenus.
+
+| # | Amélioration | Origine | Détail |
+| --- | --- | --- | --- |
+| 1 | Contrôle des extensions PHP au build | SEC-07 | Le build échoue si `mbstring`, `pdo_mysql` ou `opcache` manque. `mbstring` est bien compilé dans l'image officielle (vérifié, `--enable-mbstring`) : c'est un garde-fou, pas une correction |
+| 2 | Durée maximale des requêtes SQL de l'API publique | SEC-03 | `max_statement_time` (MariaDB) sur les connexions de `api.php` ; conseil de limite de débit au reverse proxy dans le README ; cache serveur de 60 s à évaluer |
+| 3 | Écoute sur `127.0.0.1` et section « Exposer sur Internet » | SEC-01 | Fichier `docker-compose.override.yml` documenté (`ports: !override`, Compose ≥ 2.24) plutôt qu'une variable `AISSEASTATS_BIND` (syntaxe `${VAR:+…}` incertaine sur les anciennes versions de Compose) ; le `docker-compose.yml` ne change pas ; README : HTTPS obligatoire, exemple Caddy, limite de débit, pare-feu |
+| 4 | Test CI sur la vraie pile Docker, puis durcissement du conteneur web | SEC-04 | Job CI `stack` (beta.1) : construit l'image, démarre db + app + worker avec Docker Compose et lance `tests/stack.sh`. Durcissement dans `docker-compose.hardened.yml` (facultatif, `no-new-privileges`, `cap_drop: [ALL]` + SETUID, SETGID, KILL), testé en variante non bloquante ; intégré au `docker-compose.yml` en 1.2.0 si la CI est verte |
+| 5 | Avertissement sur les mots de passe courts | SEC-05 | Message non bloquant sous 8 caractères, à l'installation et au changement ; la décision de la 1.1.5 (pas de longueur minimale) est conservée |
+
+Points non retenus, avec leur justification :
+
+- **SEC-02, webhook vers le réseau local** : voulu (alerte vers un Home Assistant local) et réservé à l'admin ; petite amélioration possible, ne plus afficher le corps des réponses en erreur.
+- **SEC-06, photos non réencodées** : envoi réservé à l'admin, image servie avec un type fixe et une CSP « sandbox » ; réencoder demanderait la bibliothèque GD pour un gain minime.
+
 ## 8. Planning
 
 | Version | Contenu |
 | --- | --- |
-| 1.1.6 | Correctifs de la revue de sécurité |
-| 1.2.0-beta.1 | MQTT et découverte Home Assistant, alertes navires (MQTT, ntfy et autres canaux), adresse publique dans l'admin, début de la collecte de l'historique des destinations |
-| 1.2.0-beta.2 | Constellation : destinations (A) et ports (B), 2D avec effet relief |
-| 1.2.0-beta.3 | Résumé quotidien et hebdomadaire, records, signal et distance |
-| 1.2.0 | Version finale après retours des testeurs |
+| 1.1.6 | Correctifs de la revue de sécurité (publiée) |
+| 1.2.0-beta.1 | Tout le périmètre : MQTT et découverte Home Assistant, alertes navires (MQTT, ntfy, Telegram, webhook, e-mail), adresse publique dans l'admin, constellation (destinations et ports, 2D avec effet relief), résumés quotidien et hebdomadaire, records, signal et distance, durcissement §7.1 ; la collecte de l'historique des destinations démarre. Le durcissement du conteneur web (§7.1, point 4) n'est inclus que si le job CI sur la vraie pile Docker est vert, sinon il passe à la 1.2.0 |
+| 1.2.0 | Une à deux semaines plus tard : corrections issues des retours des testeurs ; le réseau des ports a ses premières semaines de données |
+
+Pourquoi une beta (décision du 22 octobre 2026, deux étapes au lieu de quatre) :
+
+- **Pas d'étiquette `latest`** pour une version beta : seuls les volontaires l'installent (`AISSEASTATS_VERSION=1.2.0-beta.1` ou construction locale) ; les installations en mise à jour automatique restent sur la 1.1.x.
+- **Le réseau des ports** a besoin de semaines d'historique : la collecte démarre avec la beta, la vue est utile à la 1.2.0.
+- **Ce qui ne se vérifie qu'en conditions réelles** (client MQTT face à Mosquitto et au module MQTT de Home Assistant, durcissement du conteneur web sur les vraies images) passe par la CI et les testeurs avant d'arriver chez tout le monde.
 
 ## 9. Questions ouvertes
 
@@ -148,5 +172,6 @@ Aucune à ce stade (toutes tranchées le 21 octobre 2026).
 | Rafales d'alertes dans un port chargé | Une alerte par passage, plafond horaire, plages silencieuses |
 | Client MQTT maison incomplet face à certains serveurs | Tests contre Mosquitto (avec et sans TLS, avec et sans identifiants) et le module MQTT de Home Assistant |
 | Constellation illisible avec trop de destinations | Top N, regroupement « autres », dictionnaire de destinations |
-| Réseau des ports pauvre au début | Collecte dès la beta.1 ; message « ports reliés depuis le … » tant que l'historique est court |
+| Réseau des ports pauvre au début | Collecte dès la beta ; message « ports reliés depuis le … » tant que l'historique est court |
 | Destinations déclarées fantaisistes | Dictionnaire existant, valeurs sans signification regroupées en « inconnue » |
+| Durcissement du conteneur web qui empêche PHP-FPM ou lighttpd de démarrer | Appliqué seulement après le job CI sur la vraie pile Docker ; capacités ajoutées une à une selon le test |

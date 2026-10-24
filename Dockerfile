@@ -2,9 +2,14 @@
 # The same image runs the background worker (command: worker).
 FROM php:8.3-fpm-alpine
 
+# PHP extensions: pdo_mysql and opcache are compiled here (the official image installs gcc for this step and
+# removes it at the end of the same step: it is not left in the image); mbstring, json and zlib come with the
+# official image. The build stops if one of them is missing.
+
 RUN apk add --no-cache lighttpd tzdata \
  && docker-php-ext-install -j"$(nproc)" pdo_mysql opcache \
- && rm -rf /tmp/pear
+ && rm -rf /tmp/pear \
+ && php -r 'foreach (["mbstring", "pdo_mysql", "json", "zlib", "Zend OPcache"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "missing PHP extension: $e\n"); exit(1); } }'
 
 COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zzz-aisseastats.conf
 COPY docker/php.ini /usr/local/etc/php/conf.d/zz-aisseastats.ini

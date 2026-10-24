@@ -4,3 +4,4 @@
 /vendor/
 /node_modules/
 var/
+docker-compose.override.yml

@@ -13,6 +13,7 @@ final class Worker
     private int $lastPurge = 0;
     private int $lastFull = 0;
     private int $lastTags = 0;
+    private ?MqttPublisher $mqtt = null;
 
     public function tick(?int $now = null): void
     {
@@ -33,11 +34,23 @@ final class Worker
             $this->lastFull = $now;
         }
         Settings::set('worker_heartbeat', $now);
-        // Alerts last, and isolated: a failing notification channel never stops the statistics.
+        // MQTT, alerts and summaries last, and isolated: a failing broker or channel never stops the statistics.
+        $this->mqtt ??= new MqttPublisher();
+        MqttPublisher::$current = $this->mqtt;
+        try {
+            $this->mqtt->tick($now);
+        } catch (\Throwable $e) {
+            error_log('[aisseastats] mqtt: ' . $e->getMessage());
+        }
         try {
             Alert::check($now);
         } catch (\Throwable $e) {
             error_log('[aisseastats] alerts: ' . $e->getMessage());
+        }
+        try {
+            Notify::check($now);
+        } catch (\Throwable $e) {
+            error_log('[aisseastats] notify: ' . $e->getMessage());
         }
     }
 
@@ -223,6 +236,9 @@ final class Worker
         self::deleteChunked('DELETE FROM vessel_hourly WHERE hour_ts < ? LIMIT 5000', [$now - 35 * 86400]);
         self::deleteChunked('DELETE FROM ingest_log WHERE ts < ? LIMIT 5000', [$now - 7 * 86400]);
         self::deleteChunked('DELETE FROM traffic_cell WHERE day < ? LIMIT 5000', [gmdate('Y-m-d', $now - 400 * 86400)]);
+        self::deleteChunked('DELETE FROM signal_band WHERE day < ? LIMIT 5000', [gmdate('Y-m-d', $now - 400 * 86400)]);
+        self::deleteChunked('DELETE FROM destination_change WHERE ts < ? LIMIT 5000', [$now - 400 * 86400]);
+        self::deleteChunked('DELETE FROM vessel_alert WHERE ts < ? LIMIT 5000', [$now - 90 * 86400]);
         Debug::purge($now);
         LoginGuard::purge($now);
         Enrich::purge($now);

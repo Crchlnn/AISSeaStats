@@ -2,8 +2,8 @@ name: Release image
 
 # Publishes the ready-made image on GitHub Container Registry for 64-bit Raspberry Pi (arm64) and PC (amd64)
 # when a version tag is pushed (git tag v1.1.2 && git push --tags):
-#   ghcr.io/<owner>/aisseastats:1.1.2, :1.1 and :latest
-# A pre-release tag (v1.2.0-beta.1) only gets its exact version. A manual run on main publishes :edge, for testing.
+#   ghcr.io/<owner>/aisseastats:1.1.2, :1.1, :1 and :latest
+# A pre-release tag (v1.2.0-beta.1) only gets its exact version: never :latest, :1.2 or :1. A manual run on main publishes :edge, for testing.
 
 on:
   push:
@@ -53,6 +53,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
           labels: |
             org.opencontainers.image.title=AISSeaStats

@@ -104,6 +104,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             . '<h3 class="sub">' . $t('setup.done.token') . '</h3>'
             . '<pre class="cmd">' . Web::e($token) . '</pre>'
             . '<p class="notice">' . $t('setup.done.token_once') . '</p>'
+            . (mb_strlen($pass) < 8 ? '<p class="notice warn">' . $t('admin.password_short') . '</p>' : '')
             . Page::aiscatcherHelp($token)
             . '<p><a class="btn" href="index.php">' . $t('setup.done.go') . '</a> '
             . '<a class="btn secondary" href="admin.php">' . $t('nav.admin') . '</a></p></section>';

@@ -291,6 +291,7 @@ details.import[open] summary { margin-bottom: 8px; }
 .notice { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); font-size: 14px; }
 .notice.ok { border-color: var(--good); }
 .notice.err { border-color: var(--critical); }
+.notice.warn { border-color: var(--warning); }
 pre.cmd {
   white-space: pre-wrap; word-break: break-all; background: var(--surface-2); padding: 12px; border-radius: 8px;
   border: 1px solid var(--border); font-size: 13px; font-family: ui-monospace, Menlo, monospace; margin: 8px 0;
@@ -375,7 +376,7 @@ pre.cmd {
 .dest-seen .btn { padding: 4px 10px; font-size: 13px; }
 
 /* Admin: alert channels */
-.alert-ch { border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px 10px; margin: 14px 0; }
+.alert-ch { border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px 10px; margin: 14px 0; min-width: 0; }
 .alert-ch legend { font-weight: 600; padding: 0 6px; }
 .alert-ch .help { margin: 0 0 8px; font-size: 12px; color: var(--text-3); }
 .err-text { color: var(--critical); }
@@ -383,6 +384,16 @@ pre.cmd {
 .alert-ch .field { align-content: start; }
 .field .check { margin: 2px 0 0; font-size: 13px; font-weight: 400; }
 .field .check input { width: auto; margin: 0; }
+/* Admin: notifications (1.2.0) */
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0 14px; margin-bottom: 8px; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table th { font-weight: 550; font-size: 13px; text-align: left; padding: 6px; border-bottom: 1px solid var(--grid); }
+.table.route-grid { width: auto; min-width: 100%; }
+.table.route-grid th:not(:first-child), .table.route-grid td { text-align: center; }
+.table.route-grid th.muted { color: var(--text-3); font-weight: 400; }
+.table.route-grid input { width: 18px; height: 18px; margin: 0; }
+.table.notify-log td { font-size: 13px; vertical-align: top; }
+.nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Admin: debug capture */
 .debug-list details { border-bottom: 1px solid var(--grid); padding: 6px 0; font-size: 13px; }
 .debug-list summary { cursor: pointer; font-variant-numeric: tabular-nums; }
@@ -441,3 +452,35 @@ pre.cmd {
 }
 .reg-every { white-space: nowrap; }
 #regulars-table td.r { width: 1%; }
+
+/* Constellation, records, signal (1.2.0) */
+.card-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.constellation { position: relative; width: 100%; min-height: 360px; }
+.constellation.empty { display: grid; place-items: center; min-height: 160px; text-align: center; }
+.const-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.const-label { font-size: 12px; fill: var(--text-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.const-label.station { font-weight: 650; fill: var(--text); }
+.const-node[role="button"], .const-link { cursor: pointer; }
+.const-node[role="button"]:hover circle, .const-node[role="button"]:focus-visible circle { stroke: var(--text); stroke-width: 2px; }
+.const-node[role="button"]:hover .const-label, .const-node[role="button"]:focus-visible .const-label { fill: var(--text); }
+.const-node:focus, .const-link:focus { outline: none; }
+.const-linkhit:hover .const-link, .const-link:focus-visible { stroke: var(--text); stroke-opacity: .9; }
+.const-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0; margin: 6px 0 0; font-size: 12px; color: var(--text-2); }
+.const-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.const-alt { margin-top: 6px; font-size: 13px; }
+.const-alt summary { cursor: pointer; color: var(--text-2); padding: 4px 0; }
+.records { list-style: none; margin: 0; padding: 0; }
+.records li { display: flex; gap: 12px; align-items: flex-start; padding: 9px 2px; border-bottom: 1px solid var(--grid); }
+.records li:last-child { border-bottom: 0; }
+.rec-icon { font-size: 20px; line-height: 1.2; width: 26px; text-align: center; flex: none; }
+.rec-body { min-width: 0; }
+.rec-label { font-size: 12px; color: var(--text-3); }
+.rec-value { font-size: 14px; overflow-wrap: anywhere; }
+.rec-value strong { font-variant-numeric: tabular-nums; font-weight: 650; }
+.rec-who { color: var(--text-2); }
+.rec-link {
+  background: none; border: 0; padding: 0; cursor: pointer; color: var(--accent); font: inherit;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.sig-sector { font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); max-width: 100%; }
+#chart-signal[hidden] { display: none; }

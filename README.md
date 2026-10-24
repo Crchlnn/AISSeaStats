@@ -15,7 +15,11 @@ AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it
 - **Busiest hours**: average traffic by weekday and hour
 - **Station reception**: hour-by-hour strip, share of hours with messages and interruptions
 - A **vessel card** on click: photo (your own, or Wikimedia Commons), identity, size, first and last seen, recent passages, track, links to aiscatcher.org, VesselFinder and ShipSpotting
-- **Alerts** when your station stops receiving: ntfy, Telegram, webhook or e-mail
+- **Constellation**: where the vessels say they are going (destinations and vessel types as glossy bubbles), and the network of ports they link
+- **Records**: furthest reception, largest, fastest, rarest flag, busiest day, longest stay, first vessel
+- **Signal and distance**: mean signal level by distance and direction, to tune the antenna
+- **Alerts** when your station stops receiving, **vessel alerts** (watch list, military, distress, range record…) and **daily or weekly summaries**: ntfy, Telegram, webhook, e-mail or MQTT
+- **Home Assistant** sensors through MQTT, discovered automatically
 
 French and English, light and dark themes, works on a phone. Runs next to AIS-catcher on a Raspberry Pi.
 
@@ -27,6 +31,8 @@ French and English, light and dark themes, works on a phone. Runs next to AIS-ca
   <img src="docs/screenshots/vessel-card.png" alt="Vessel card with identity, track on the map and recent passages" width="49%">
   <img src="docs/screenshots/fleet-range.png" alt="Top vessels, fleet by type and flag, range by direction" width="49%">
 </p>
+
+![Constellation: destinations declared by the vessels around the station, with their vessel types](docs/screenshots/constellation.png)
 
 ![Regulars, busiest hours by weekday and hour, and station reception hour by hour (dark theme)](docs/screenshots/new-stats.png)
 
@@ -113,8 +119,10 @@ Manual alternative from the cloned folder: `cp .env.example .env`, edit the pass
 | Tag | Follows |
 | --- | --- |
 | `latest` | the latest release (default) |
+| `1` | every 1.x release, new features included (1.2.0, 1.3.0…), never a 2.0 |
 | `1.1` | bug fixes of 1.1 only (1.1.2, 1.1.3…) |
 | `1.1.2` | exactly this version |
+| `1.2.0-beta.1` | a test version: only this exact tag, never `latest`, `1` or `1.2` |
 
 To pin a tag, set `AISSEASTATS_VERSION=1.1` (for example) in `.env`. Database changes are applied when the container starts, so an automatic updater (Watchtower or similar) that pulls a new image and restarts the `app` and `worker` containers keeps working with your data. Updates then install without you looking: keep a backup (see [Everyday commands](#everyday-commands)), or pin a tag to choose when to move on.
 
@@ -194,12 +202,15 @@ Then reload the page (Ctrl+F5 / Cmd+Shift+R if the look did not change). Check t
 - **Going back to a previous version**: set `AISSEASTATS_VERSION=1.1.1` (for example) in `.env` and run `docker compose pull && docker compose up -d`, or `git checkout v1.1.1` then `docker compose up -d --build`. Database changes are not rolled back, so prefer restoring a backup taken before the upgrade.
 - Only `docker compose down -v` deletes the data (the `-v` removes the volume).
 
+**Testing a beta.** Test versions are published under their exact tag only, so `latest` users never get them. To try one: `git fetch --tags && git checkout v1.2.0-beta.1`, set `AISSEASTATS_VERSION=1.2.0-beta.1` in `.env`, then `docker compose pull && docker compose up -d` (or `docker compose up -d --build`). Back to the releases: `git checkout main && git pull`, empty `AISSEASTATS_VERSION`, `docker compose pull && docker compose up -d`. A beta's database changes stay (they only add tables), so a backup first is a good idea.
+
 ## Version history
 
 Newest first. Details, fixes and database changes for each version: [CHANGELOG.md](CHANGELOG.md) (English) · [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md) (français).
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.2.0-beta.1 | 2026-10-23 | Test version. Home Assistant sensors through MQTT; vessel alerts (watch list, military, distress, range record…) and daily or weekly summaries on ntfy, Telegram, webhook, e-mail or MQTT, with quiet hours and channels per kind; constellation of destinations and ports network; records; signal and distance; public address for links in alerts; hardening (database time limit on the public API, image checks, end-to-end test of the Docker stack, [Exposing to the Internet](#exposing-to-the-internet)) |
 | 1.1.6 | 2026-10-21 | Security review fixes: login attempts limited, one-time setup code, photo look-ups only for received vessels, refused ingest posts no longer logged, strict `INGEST_ALLOW`, worker without root, option to round the published position, admin session timeout |
 | 1.1.5 | 2026-10-15 | Top routes drawn along their most typical real track instead of a straight line (rivers, fairways), with arrows of the same size at every zoom; no minimum length for the admin password |
 | 1.1.4 | 2026-10-13 | Traffic density map: range of the period and all-time range record drawn by direction, each one can be hidden; history after an update computed about 5 times faster, with its progress shown |
@@ -240,11 +251,16 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 - **Exceptional propagation.** A day is flagged (orange triangle above the bar) when its range is at least twice the usual range (median of the 30 previous days), at least 20 NM more, and at least 3 vessels were heard beyond 1.5 × the usual range. Beyond the horizon, VHF reception depends on tropospheric ducting, which follows the weather: see the forecast on [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html).
 - **Regulars.** Time between passages is measured from the end of one passage to the start of the next (a passage ends after 2 hours without hearing the vessel). Vessels with at least 4 passages in the period are ranked by how steady that time is. A vessel moored at the edge of coverage, heard on and off, can count several short passages.
 - **Busiest hours.** Average number of vessels per hour, by weekday and hour in the station's time zone, over the period (at least 7 days). Hours without any message are left out, so an outage does not look like calm.
+- **Constellation.** *Destinations*: the station in the centre, the destinations declared by the vessels seen in the period around it (bubble size = number of vessels, spellings grouped with the destination dictionary; unknown and meaningless destinations left out), and their vessel types as small bubbles. *Ports*: when a vessel changes its declared destination, its old port is linked to the new one; arrows follow the direction of travel and their width is the number of vessels. This history is recorded since 1.2.0, so the view fills over a few weeks. Click a bubble or an arrow to list its vessels; "Show as a list" gives the same information as text.
+- **Records.** All-time records of the station, with the vessel and the date: furthest reception (same rule as the range chart), largest vessel, fastest (class A and B, up to 60 kn so that bad positions and aircraft are left out), rarest flag, busiest day (vessels), longest continuous presence (one passage), first vessel received.
+- **Signal and distance.** Mean signal level of the positions received, by 2 NM distance bins, over the period; pick a direction to compare it with the whole station. A healthy station shows a steady decrease with distance; a direction that drops early points to an obstacle or the antenna's pattern. The level comes from the `signalpower` field of the messages AIS-catcher sends; recorded since 1.2.0.
 - **Station reception.** One cell per hour: green when messages were received, red when none were. At a station that always hears a shore base station, red means an outage; in a quiet area it can also mean no traffic. To be warned of outages, see [Alerts](#alerts).
 
 ## Admin page
 
-`http://<pi-address>:8095/admin.php`: ingestion health, station settings, rules for interesting vessels, named zones for routes, destination dictionary, alerts, vessel photos, token rotation, password, deletion of one vessel's data or of everything.
+`http://<pi-address>:8095/admin.php`: ingestion health, station settings (including the optional public address of the page), alerts, MQTT and Home Assistant, vessel alerts and summaries, rules for interesting vessels, named zones for routes, destination dictionary, vessel photos, token rotation, password, deletion of one vessel's data or of everything.
+
+**Military vessels.** No MMSI block is reserved for warships: each country assigns their numbers (usually in its normal range), and many do not transmit, or transmit with AIS type 35. The rule tags type 35 and the MMSI prefixes you list in the admin (known prefixes of your area).
 
 **Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`SW → NE`). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
 
@@ -266,6 +282,33 @@ AIS-catcher does not tell you when reception stops. AISSeaStats can: in the admi
 “Send a test” checks each channel and shows the error if one fails. These alerts are sent by the Pi itself, so they cannot warn you if the Pi is off or offline: for that, give a **heartbeat** URL (healthchecks.io, Uptime Kuma in Push mode…), called every 5 minutes while reception works.
 
 <img src="docs/screenshots/admin-alerts.png" alt="Alert settings in the admin page" width="70%">
+
+### Vessel alerts and summaries
+
+Since 1.2.0, the same channels (and MQTT) can also carry, from the admin card **Vessel alerts and summaries**:
+
+- **Vessel alerts**, each reason can be turned on: watch list, distress, military, authorities and rescue, dangerous goods, very large, rare flag, superyacht, first visit, new range record, exceptional propagation. On by default once enabled: watch list, distress, military, range record. Reasons come from the interesting-vessel rules. A vessel alerts once per passage and reason; several reasons make one message, with its type, flag, distance, direction, destination and, if you gave the page's public address, a link that opens its card. A first visit waits for one week of history; a range record alerts at most every 30 minutes, with the best value reached meanwhile.
+- **Quiet hours** (distress beacons still go through) and a **maximum per hour**: held alerts are logged, not sent later.
+- **Summaries**, daily (20:00 by default) and/or weekly (Sunday 20:00): vessels, new vessels, messages, best range, interesting vessels, busiest hour. "Save and send today's summary" tries it at once.
+- **Channels per kind of message**: for example reception alerts by e-mail, vessel alerts on ntfy and MQTT, summaries on Telegram.
+- The last 100 messages are listed with their result (sent, quiet hours, maximum reached, channel error).
+
+The webhook and MQTT messages are JSON with `event`, `kind` (`reception`, `vessel`, `summary`), `title`, `message`, `priority`, and for a vessel `mmsi`, `name`, `triggers`, `distance_nm`, `url`; a summary also has `data` with its figures.
+
+## Home Assistant (MQTT)
+
+In the admin, **MQTT / Home Assistant**: server (the Mosquitto add-on of Home Assistant, for example), port, user and password, optional TLS (with or without checking the certificate, for a self-signed one on your home network). "Send a test" connects and publishes a test message.
+
+With discovery on (default), an **AISSeaStats** device appears in Home Assistant with its sensors: vessels today, active vessels, new vessels today, messages today, messages in the last hour, today's range, range record, age of the last message, and a *Reception* connectivity sensor. The worker keeps one connection open and publishes every minute:
+
+| Topic | Content |
+| --- | --- |
+| `aisseastats/<station>/state` | JSON of all values, retained |
+| `aisseastats/<station>/availability` | `online` / `offline`; the server publishes `offline` itself if the worker stops (last will) |
+| `aisseastats/<station>/event` | alerts and summaries routed to MQTT (QoS 1, not retained) |
+| `homeassistant/…/aisseastats_<id>/…/config` | discovery, retained, refreshed hourly |
+
+No message is published per vessel. `<station>` is the station name in lower case (letters, digits and dashes); the prefixes can be changed. Example automation: trigger on `mqtt` topic `aisseastats/+/event`, condition `{{ trigger.payload_json.kind == 'vessel' }}`, then a notification with `{{ trigger.payload_json.title }}`.
 
 ## Photos
 
@@ -290,24 +333,59 @@ Free photos are shown with author and licence and cached 30 days. Many fishing b
 
 ## Security
 
-- Designed for a home network. Do not expose it to the Internet without a reverse proxy with authentication and TLS.
+- Designed for a home network. To publish the page, read [Exposing to the Internet](#exposing-to-the-internet) first.
 - Ingestion requires the token (HTTP Basic or Bearer), compared in constant time; payload size is capped; every query is parameterised. Refused posts are not logged as batches.
 - The stats page is read-only and sets no cookie for visitors. The admin uses a hashed password, CSRF tokens and `SameSite=Strict` cookies; failed logins are limited (10 per address or 100 in total within 15 minutes, then refused for 15 minutes; `bin/reset-admin.php` lifts the lock), and an admin session ends after 8 hours without activity. A strict Content-Security-Policy is sent; JavaScript libraries are bundled.
 - The setup wizard asks for a one-time code that only the person running the server can see.
 - `INGEST_ALLOW` in `.env` can restrict ingestion to given networks (comma separated CIDRs such as `192.168.1.0/24`; an invalid entry is ignored and logged, never read as "everything"). Behind a reverse proxy, the address seen is the proxy's.
 - Admin → Station can round the position shown on the public page and API to about 1 km (useful when the antenna is at home and the page is public).
 - Vessel photos are looked up online only for vessels your station received, at most 30 a minute.
-- The background worker container runs as `www-data` without any Linux capability; the database port is not published.
+- The background worker container runs as `www-data` without any Linux capability; the database port is not published. `docker-compose.hardened.yml` (optional) also removes the web container's capabilities except those its servers need.
+- Each query of the public API is stopped after 20 seconds, so that nobody can keep the database busy; the image build fails if a required PHP extension is missing; a (non-blocking) warning is shown for an admin password under 8 characters.
+- MQTT checks the server's TLS certificate unless you turn it off; passwords and tokens are never shown back in the admin.
 - Radio reception and redistribution of AIS data depend on local regulations.
+
+## Exposing to the Internet
+
+AISSeaStats is made for a home network. If you want the page reachable from outside:
+
+1. **Put a reverse proxy with HTTPS in front** (Caddy, Nginx Proxy Manager, Traefik, Cloudflare Tunnel…), never port 8095 directly. Example with Caddy, which gets the certificate by itself:
+
+   ```
+   ais.example.org {
+       @private path /admin.php /setup.php /ingest.php
+       respond @private 404
+       reverse_proxy 127.0.0.1:8095
+   }
+   ```
+
+   This publishes the statistics only: the admin, setup and ingestion stay reachable from your home network at `http://<pi-address>:8095`. If you need the admin from outside, use a VPN (WireGuard, Tailscale) rather than opening it.
+2. **Listen on the Pi only** when the proxy runs on the same machine. Create `docker-compose.override.yml` next to `docker-compose.yml` (Docker Compose 2.24 or later):
+
+   ```yaml
+   services:
+     app:
+       ports: !override
+         - "127.0.0.1:8095:8080"
+   ```
+
+   then `docker compose up -d`. AIS-catcher on the same Pi keeps posting to `http://127.0.0.1:8095/ingest.php`; an AIS-catcher on another machine then needs the proxy's address. Git does not track this file, so it survives updates.
+3. **Limit the request rate** at the proxy if it can (Nginx `limit_req`, Caddy's rate-limit plugin, Cloudflare rules), and **open only ports 80/443** on the router or firewall.
+4. Set **Admin → Station → public address** so that alerts link to the public page, and consider **rounding the published position**.
+5. Optional: `docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d` for the extra container hardening.
+
+Behind a proxy, the address seen by `INGEST_ALLOW` and the login limits is the proxy's: keep ingestion on the home network as in the example above.
 
 ## Development
 
 ```sh
 php tests/run.php                                         # unit tests
 DB_HOST=127.0.0.1 DB_NAME=test DB_USER=… DB_PASSWORD=… php tests/run.php   # + integration tests
+MQTT_TEST_HOST=127.0.0.1 …  php tests/run.php            # + MQTT tests against a broker (Mosquitto)
+sh tests/stack.sh                                         # end-to-end test of a running Docker stack (CI)
 ```
 
-Stack: PHP 8.3 without framework, MariaDB, vanilla JavaScript with [Chart.js](https://www.chartjs.org/), [Leaflet](https://leafletjs.com/) and [Leaflet.heat](https://github.com/Leaflet/Leaflet.heat) bundled in `public/assets/vendor`. Scoping notes: [docs/CADRAGE.md](docs/CADRAGE.md).
+Stack: PHP 8.3 without framework, MariaDB, vanilla JavaScript with [Chart.js](https://www.chartjs.org/), [Leaflet](https://leafletjs.com/) and [Leaflet.heat](https://github.com/Leaflet/Leaflet.heat) bundled in `public/assets/vendor`. Scoping notes: [docs/CADRAGE.md](docs/CADRAGE.md), [docs/CADRAGE-1.2.0.md](docs/CADRAGE-1.2.0.md).
 
 ## Licence
 

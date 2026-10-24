@@ -1,6 +1,6 @@
 # AISSeaStats — guide rapide
 
-Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic. Depuis la 1.1.0 : navires vus par tranche de distance, jours de propagation exceptionnelle et navires les plus lointains, habitués (temps entre deux passages), heures d'affluence et réception de la station heure par heure. En 1.1.1 : tranche de distance de chaque navire dans la liste d'une barre, navire, date et heure de chaque record de portée. En 1.1.3 : carte de densité du trafic (heatmap des trajets), avec la portée par direction depuis la 1.1.4. En 1.1.5 : routes tracées le long de leur trajet réel le plus typique.
+Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic. Depuis la 1.1.0 : navires vus par tranche de distance, jours de propagation exceptionnelle et navires les plus lointains, habitués (temps entre deux passages), heures d'affluence et réception de la station heure par heure. En 1.1.1 : tranche de distance de chaque navire dans la liste d'une barre, navire, date et heure de chaque record de portée. En 1.1.3 : carte de densité du trafic (heatmap des trajets), avec la portée par direction depuis la 1.1.4. En 1.1.5 : routes tracées le long de leur trajet réel le plus typique. En 1.2.0 (bêta) : capteurs Home Assistant par MQTT, alertes navires et résumés quotidiens ou hebdomadaires, constellation des destinations et réseau des ports, records, signal et distance.
 
 ![Page de statistiques : chiffres clés, navires vus par heure, top routes et destinations déclarées](screenshots/overview.png)
 
@@ -8,6 +8,8 @@ Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvd
   <img src="screenshots/vessel-card.png" alt="Fiche navire : identité, trace sur la carte, passages récents" width="49%">
   <img src="screenshots/fleet-range.png" alt="Top navires, flotte par type et pavillon, portée par direction" width="49%">
 </p>
+
+![Constellation : destinations déclarées par les navires autour de la station, avec leurs types](screenshots/constellation.png)
 
 ![Habitués, heures d'affluence par jour et heure, réception de la station heure par heure (thème sombre, interface anglaise)](screenshots/new-stats.png)
 
@@ -66,7 +68,7 @@ docker compose up -d
 docker compose exec app php bin/setup-code.php   # le code demandé par l'assistant
 ```
 
-**Image toute prête** : `ghcr.io/crchlnn/aisseastats`, pour `linux/arm64` (Raspberry Pi 4/5 sous système 64 bits) et `linux/amd64`, publiée automatiquement par GitHub Actions à chaque version. Étiquettes : `latest` (dernière version, par défaut), `1.1` (corrections de la 1.1 seulement), `1.1.2` (exactement cette version) ; pour en fixer une, mettez par exemple `AISSEASTATS_VERSION=1.1` dans `.env`. Les évolutions de la base s'appliquent au démarrage du conteneur : un outil de mise à jour automatique (Watchtower ou équivalent) qui télécharge la nouvelle image et redémarre `app` et `worker` fonctionne avec vos données. Les mises à jour s'installent alors sans vous : gardez une sauvegarde, ou fixez une étiquette pour choisir le moment.
+**Image toute prête** : `ghcr.io/crchlnn/aisseastats`, pour `linux/arm64` (Raspberry Pi 4/5 sous système 64 bits) et `linux/amd64`, publiée automatiquement par GitHub Actions à chaque version. Étiquettes : `latest` (dernière version, par défaut), `1` (toutes les versions 1.x, nouveautés comprises, jamais une 2.0), `1.1` (corrections de la 1.1 seulement), `1.1.2` (exactement cette version), `1.2.0-beta.1` (version de test : seulement cette étiquette exacte, jamais `latest`, `1` ni `1.2`) ; pour en fixer une, mettez par exemple `AISSEASTATS_VERSION=1.1` dans `.env`. Les évolutions de la base s'appliquent au démarrage du conteneur : un outil de mise à jour automatique (Watchtower ou équivalent) qui télécharge la nouvelle image et redémarre `app` et `worker` fonctionne avec vos données. Les mises à jour s'installent alors sans vous : gardez une sauvegarde, ou fixez une étiquette pour choisir le moment.
 
 ## Brancher AIS-catcher
 
@@ -139,12 +141,15 @@ Rechargez ensuite la page (Ctrl+F5 / Cmd+Maj+R si l'affichage n'a pas changé). 
 - **Revenir à une version précédente** : mettez `AISSEASTATS_VERSION=1.1.1` (par exemple) dans `.env` puis `docker compose pull && docker compose up -d`, ou `git checkout v1.1.1` puis `docker compose up -d --build`. Les évolutions de la base ne sont pas annulées : préférez restaurer une sauvegarde faite avant la mise à jour.
 - Seul `docker compose down -v` efface les données (le `-v` supprime le volume).
 
+**Tester une bêta.** Les versions de test ne sont publiées que sous leur étiquette exacte : les utilisateurs de `latest` ne les reçoivent jamais. Pour en essayer une : `git fetch --tags && git checkout v1.2.0-beta.1`, mettez `AISSEASTATS_VERSION=1.2.0-beta.1` dans `.env`, puis `docker compose pull && docker compose up -d` (ou `docker compose up -d --build`). Pour revenir aux versions publiées : `git checkout main && git pull`, videz `AISSEASTATS_VERSION`, puis `docker compose pull && docker compose up -d`. Les évolutions de la base d'une bêta restent (elles ne font qu'ajouter des tables) : une sauvegarde avant est une bonne idée.
+
 ## Historique des versions
 
 La plus récente en premier. Détail, corrections et évolutions de la base pour chaque version : [CHANGELOG.fr.md](CHANGELOG.fr.md) (français) · [CHANGELOG.md](../CHANGELOG.md) (English).
 
 | Version | Date | Nouveautés |
 |---|---|---|
+| 1.2.0-beta.1 | 23/10/2026 | Version de test. Capteurs Home Assistant par MQTT ; alertes navires (liste de surveillance, militaire, détresse, record de portée…) et résumés quotidiens ou hebdomadaires sur ntfy, Telegram, webhook, e-mail ou MQTT, avec heures calmes et canaux par type ; constellation des destinations et réseau des ports ; records ; signal et distance ; adresse publique pour les liens des alertes ; durcissement (temps limite des requêtes de l'API publique, vérifications de l'image, test de bout en bout de la pile Docker, [Exposer sur Internet](#exposer-sur-internet)) |
 | 1.1.6 | 21/10/2026 | Corrections de la revue de sécurité : tentatives de connexion limitées, code d'installation à usage unique, photos cherchées seulement pour les navires reçus, envois refusés non journalisés, `INGEST_ALLOW` strict, worker sans root, option d'arrondi de la position publiée, expiration des sessions admin |
 | 1.1.5 | 15/10/2026 | Top routes tracées le long de leur trajet réel le plus typique au lieu d'une ligne droite (fleuves, chenaux), flèches de même taille à tous les zooms ; plus de longueur minimale pour le mot de passe d'administration |
 | 1.1.4 | 13/10/2026 | Carte de densité : portée de la période et record absolu de portée tracés par direction, chacun masquable ; historique calculé environ 5 fois plus vite après une mise à jour, avec son avancement affiché |
@@ -182,9 +187,64 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 | Arrêter (données conservées) | `docker compose down` |
 | Tout supprimer | `docker compose down -v` |
 
+## Nouveautés 1.2.0
+
+- **Constellation** : vue *Destinations* — la station au centre, autour les destinations déclarées par les navires de la période (taille = nombre de navires, variantes regroupées par le dictionnaire, destinations inconnues ou sans signification écartées) et, en petites bulles, leurs types de navires. Vue *Ports* — quand un navire change de destination, l'ancien port est relié au nouveau ; les flèches suivent le sens du trajet, leur épaisseur est le nombre de navires. Cet historique est enregistré depuis la 1.2.0 : la vue se remplit en quelques semaines. Un clic sur une bulle ou une flèche liste les navires ; « Voir en liste » donne la même information en texte.
+- **Records** : réception la plus lointaine, plus grand navire, plus rapide (classes A et B, jusqu'à 60 nœuds pour écarter positions aberrantes et aéronefs), pavillon le plus rare, journée la plus chargée, plus longue présence continue, premier navire reçu, avec le navire et la date.
+- **Signal et distance** : niveau moyen du signal des positions reçues, par tranches de 2 NM, sur la période ; choisissez une direction pour la comparer à toute la station. Une station saine montre une baisse régulière avec la distance ; une direction qui chute tôt signale un obstacle ou le diagramme de l'antenne. Le niveau vient du champ `signalpower` des messages d'AIS-catcher ; enregistré depuis la 1.2.0.
+- **Alertes navires et résumés** (admin) : mêmes canaux que les alertes de réception, plus MQTT. Motifs activables un par un : liste de surveillance, détresse, militaire, autorités et secours, matières dangereuses, très grand navire, pavillon rare, grande plaisance, première visite, nouveau record de portée, propagation exceptionnelle (actifs par défaut une fois les alertes navires activées : surveillance, détresse, militaire, record de portée). Un navire n'alerte qu'une fois par passage et par motif ; plusieurs motifs font un seul message, avec type, pavillon, distance, direction, destination et, si l'adresse publique de la page est renseignée, un lien qui ouvre sa fiche. **Heures calmes** (la détresse passe quand même) et **maximum par heure** : les alertes retenues sont notées au journal, pas envoyées plus tard. **Résumés** quotidien (20 h par défaut) et/ou hebdomadaire (dimanche 20 h). **Canaux par type de message** : par exemple réception par e-mail, navires sur ntfy et MQTT, résumés sur Telegram. Les 100 derniers messages sont listés avec leur résultat.
+- **Navires militaires** : aucune série de MMSI n'est réservée aux navires de guerre. Chaque pays attribue les siens (le plus souvent dans sa plage normale), et beaucoup n'émettent pas, ou avec le type AIS 35. La règle repère le type 35 et les préfixes MMSI que vous indiquez dans l'admin.
+
+## Home Assistant (MQTT)
+
+Dans l'admin, **MQTT / Home Assistant** : serveur (par exemple le module Mosquitto de Home Assistant), port, identifiant et mot de passe, TLS facultatif (avec ou sans vérification du certificat, pour un certificat auto-signé sur le réseau local). « Envoyer un test » se connecte et publie un message de test.
+
+Avec la découverte activée (par défaut), un appareil **AISSeaStats** apparaît dans Home Assistant avec ses capteurs : navires aujourd'hui, navires actifs, nouveaux navires du jour, messages du jour, messages de la dernière heure, portée du jour, record de portée, âge du dernier message, et un capteur de connectivité *Réception*. Le worker garde une connexion ouverte et publie chaque minute :
+
+| Sujet | Contenu |
+| --- | --- |
+| `aisseastats/<station>/state` | JSON de toutes les valeurs, conservé (retain) |
+| `aisseastats/<station>/availability` | `online` / `offline` ; le serveur publie lui-même `offline` si le worker s'arrête (last will) |
+| `aisseastats/<station>/event` | alertes et résumés envoyés vers MQTT (QoS 1, non conservés) |
+| `homeassistant/…/aisseastats_<id>/…/config` | découverte, conservée, rafraîchie toutes les heures |
+
+Aucun message n'est publié par navire. `<station>` est le nom de la station en minuscules (lettres, chiffres et tirets) ; les préfixes sont modifiables. Exemple d'automatisation : déclencheur `mqtt` sur `aisseastats/+/event`, condition `{{ trigger.payload_json.kind == 'vessel' }}`, puis une notification avec `{{ trigger.payload_json.title }}`.
+
+## Exposer sur Internet
+
+AISSeaStats est fait pour un réseau domestique. Pour rendre la page accessible de l'extérieur :
+
+1. **Passez par un reverse proxy en HTTPS** (Caddy, Nginx Proxy Manager, Traefik, Cloudflare Tunnel…), jamais par le port 8095 directement. Exemple avec Caddy, qui obtient le certificat tout seul :
+
+   ```
+   ais.mondomaine.fr {
+       @prive path /admin.php /setup.php /ingest.php
+       respond @prive 404
+       reverse_proxy 127.0.0.1:8095
+   }
+   ```
+
+   Seules les statistiques sont publiées : l'admin, l'installation et l'ingestion restent accessibles depuis le réseau local à `http://<ip-du-pi>:8095`. Pour l'admin depuis l'extérieur, préférez un VPN (WireGuard, Tailscale) à une ouverture.
+2. **N'écoutez que sur le Pi** quand le proxy tourne sur la même machine. Créez `docker-compose.override.yml` à côté de `docker-compose.yml` (Docker Compose 2.24 ou plus récent) :
+
+   ```yaml
+   services:
+     app:
+       ports: !override
+         - "127.0.0.1:8095:8080"
+   ```
+
+   puis `docker compose up -d`. AIS-catcher sur le même Pi continue d'envoyer vers `http://127.0.0.1:8095/ingest.php` ; un AIS-catcher sur une autre machine doit alors passer par l'adresse du proxy. Git ne suit pas ce fichier : il survit aux mises à jour.
+3. **Limitez le débit des requêtes** au niveau du proxy s'il le permet (`limit_req` de Nginx, module rate-limit de Caddy, règles Cloudflare), et **n'ouvrez que les ports 80/443** sur la box ou le pare-feu.
+4. Renseignez **Admin → Station → adresse publique** pour que les alertes pointent vers la page publique, et pensez à **arrondir la position publiée**.
+5. Facultatif : `docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d` pour le durcissement supplémentaire des conteneurs.
+
+Derrière un proxy, l'adresse vue par `INGEST_ALLOW` et par la limite de connexions est celle du proxy : gardez l'ingestion sur le réseau local comme dans l'exemple.
+
 ## Bon à savoir
 
 - **Sécurité (1.1.6)** : 10 mauvais mots de passe depuis une adresse (ou 100 au total) en 15 minutes bloquent la connexion admin pendant 15 minutes (`bin/reset-admin.php` lève le blocage) ; une session admin expire après 8 h d'inactivité ; la page publique ne pose aucun cookie aux visiteurs. Admin → Station permet d'arrondir à environ 1 km la position publiée sur la page et l'API, utile si l'antenne est à domicile et la page publique. Une entrée invalide dans `INGEST_ALLOW` est ignorée (et signalée dans les journaux) au lieu d'ouvrir l'ingestion à tous. Le conteneur worker tourne en `www-data`, sans privilège.
+- **Sécurité (1.2.0)** : chaque requête de l'API publique est arrêtée au bout de 20 secondes, pour que personne ne puisse occuper la base ; la construction de l'image échoue s'il manque une extension PHP ; un avertissement (non bloquant) s'affiche pour un mot de passe admin de moins de 8 caractères ; MQTT vérifie le certificat TLS du serveur sauf si vous le désactivez ; mots de passe et jetons ne sont jamais réaffichés dans l'admin. `docker-compose.hardened.yml` (facultatif) retire aussi au conteneur web les privilèges dont ses serveurs n'ont pas besoin.
 
 - **Zones nommées** (page admin) : par défaut une route va d'un secteur à un autre (`SO → NE`). Ajoutez une écluse, un port ou une ville pour lire `Port → Écluse nord`.
 - **Dictionnaire des destinations** (page admin) : les équipages saisissent la destination librement (`FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`…). Regroupez les variantes d'un port sous un seul nom, par exemple `SAINT-MALO, ST-MALO, FR SML` → `FRSML`. Les valeurs sans signification (`0`, `Q`…) s'affichent « Inconnue ».

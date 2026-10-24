@@ -1,0 +1,14 @@
+# AISSeaStats — optional extra hardening (1.2.0-beta.1, being validated by the CI "stack" job)
+#
+#   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d
+#
+# The web container starts as root and its servers (lighttpd, PHP-FPM) switch to www-data: it keeps only the
+# capabilities needed for that (SETUID, SETGID) and for PHP-FPM to manage its workers (KILL). Nothing can gain
+# privileges again (no-new-privileges). The worker is already hardened in docker-compose.yml.
+services:
+  app:
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, KILL]
+    security_opt: ["no-new-privileges:true"]
+  db:
+    security_opt: ["no-new-privileges:true"]

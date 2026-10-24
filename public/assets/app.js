@@ -1009,7 +1009,7 @@
     if (l) { openList(l); }
   });
   document.addEventListener('keydown', function (e) {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('li[data-list]')) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-list][role="button"]')) {
       e.preventDefault();
       openList(e.target);
     }
@@ -1020,12 +1020,13 @@
   function openList(el) {
     var kind = el.getAttribute('data-list');
     var params = { by: kind, days: range().days };
-    if (kind === 'route') {
+    if (kind === 'route' || kind === 'link') {
       params.from = el.getAttribute('data-from');
       params.to = el.getAttribute('data-to');
     } else {
       params.value = el.getAttribute('data-value');
     }
+    if (el.getAttribute('data-type')) { params.type = el.getAttribute('data-type'); }
     showList(params, el.getAttribute('data-title'));
   }
   // Lists for one bar of the vessel chart (an hour, a day or a month) carry their own time span.
@@ -1159,6 +1160,385 @@
   });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rerender);
 
+  // ---------- Records (1.2.0) ----------
+  var REC_ICONS = { furthest: '📡', largest: '📏', fastest: '💨', rarest_flag: '🏳️', busiest_day: '📈', longest_stay: '⏳', first: '🥇' };
+  function loadRecords() {
+    api('records').then(renderRecords).catch(fail('records'));
+  }
+  function renderRecords(d) {
+    var ul = $('records');
+    var dayFmt = function (day) { return fmtDate.format(new Date(day + 'T12:00:00Z')); };
+    var items = Object.keys(REC_ICONS).map(function (k) {
+      var r = d[k];
+      if (!r) { return ''; }
+      var value, who = '', when = '';
+      switch (k) {
+        case 'furthest':
+          value = nmKm(r.dist);
+          when = r.ts ? fmtDateTime.format(new Date(r.ts * 1000)) : dayFmt(r.day);
+          break;
+        case 'largest': value = num(r.length_m) + NB + 'm' + (r.beam_m ? ' × ' + num(r.beam_m) + NB + 'm' : ''); break;
+        case 'fastest': value = nf1.format(r.speed) + NB + 'kn'; break;
+        case 'rarest_flag':
+          value = flag(r.country) + ' ' + countryName(r.country) + ' (' + t('rec.vessels', { n: num(r.n) }) + ')';
+          break;
+        case 'busiest_day':
+          value = t('rec.vessels', { n: num(r.n) });
+          when = dayFmt(r.day);
+          break;
+        case 'longest_stay': value = duration(r.secs); when = fmtDate.format(new Date(r.ts * 1000)); break;
+        case 'first': value = ''; when = fmtDateTime.format(new Date(r.ts * 1000)); break;
+      }
+      if (r.mmsi) { who = (k === 'rarest_flag' ? esc(t('rec.latest')) + ' ' : (r.country ? flag(r.country) + ' ' : '')) + vlink(r); }
+      if (k === 'busiest_day') {
+        who = '<button type="button" class="rec-link" data-list="day" data-value="' + esc(r.day) + '" data-title="' + esc(dayFmt(r.day)) + '">' +
+          esc(t('rec.see_vessels')) + '</button>';
+      }
+      return '<li><span class="rec-icon" aria-hidden="true">' + REC_ICONS[k] + '</span><div class="rec-body">' +
+        '<div class="rec-label">' + esc(t('rec.' + k)) + '</div>' +
+        '<div class="rec-value">' + (value ? '<strong>' + esc(value) + '</strong>' : '') + (who ? (value ? ' · ' : '') + '<span class="rec-who">' + who + '</span>' : '') + '</div>' +
+        (when ? '<div class="rec-when muted small">' + esc(when) + '</div>' : '') + '</div></li>';
+    }).join('');
+    ul.innerHTML = items || '<li class="muted">' + esc(t('rec.none')) + '</li>';
+    $('records-since').textContent = d.since ? t('rec.since', { d: fmtDate.format(new Date(d.since * 1000)) }) : '';
+  }
+  function duration(s) {
+    s = Number(s) || 0;
+    if (s < 3600) { return t('time.minutes', { n: Math.max(1, Math.round(s / 60)) }); }
+    if (s < 172800) { return Math.floor(s / 3600) + NB + 'h' + NB + String(Math.floor(s % 3600 / 60)).padStart(2, '0'); }
+    return t('time.days', { n: nf1.format(s / 86400) });
+  }
+
+  // ---------- Signal and distance (1.2.0) ----------
+  var DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  function loadSignal() {
+    var k = state.range;
+    api('signal', { days: range().days }).then(current(k, function (d) { last.signal = d; renderSignal(d); })).catch(fail('signal'));
+  }
+  function renderSignal(d) {
+    if (state.charts.signal) { state.charts.signal.destroy(); delete state.charts.signal; }
+    var note = $('signal-note');
+    if (!d.bins.length) {
+      note.textContent = t('sig.none');
+      $('chart-signal').hidden = true;
+      return;
+    }
+    $('chart-signal').hidden = false;
+    var sec = $('signal-sector').value;
+    var sets = [{
+      label: t('sig.all_dirs'), data: d.bins.map(function (b) { return { x: b.d, y: b.avg, n: b.n }; }),
+      borderColor: css('--series-1'), backgroundColor: css('--series-1'), borderWidth: 2.5, pointRadius: 0, pointHitRadius: 8, tension: 0.25
+    }];
+    if (sec !== '') {
+      sets.push({
+        label: t('dir.' + DIRS[sec]), data: (d.sectors[sec] || []).map(function (b) { return { x: b.d, y: b.avg, n: b.n }; }),
+        borderColor: css('--series-2'), backgroundColor: css('--series-2'), borderWidth: 2, pointRadius: 2, pointHitRadius: 8, tension: 0.25
+      });
+    }
+    var maxD = d.bins[d.bins.length - 1].d;
+    state.charts.signal = new Chart($('chart-signal'), {
+      type: 'line',
+      data: { datasets: sets },
+      options: {
+        responsive: true, maintainAspectRatio: false, parsing: true,
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        scales: {
+          x: { type: 'linear', min: 0, suggestedMax: maxD + 1, title: { display: true, text: t('sig.x') }, grid: { display: false } },
+          y: { title: { display: true, text: t('sig.y') } }
+        },
+        plugins: {
+          legend: { display: sec !== '', labels: { boxWidth: 12, boxHeight: 2 } },
+          tooltip: {
+            callbacks: {
+              title: function (items) { var x = items[0].raw.x; return nf.format(x - 1) + '–' + nf.format(x + 1) + NB + 'NM'; },
+              label: function (c) { return c.dataset.label + ' : ' + nf1.format(c.raw.y) + NB + 'dB (' + t('sig.msgs', { n: num(c.raw.n) }) + ')'; }
+            }
+          }
+        }
+      }
+    });
+    var total = d.bins.reduce(function (a, b) { return a + b.n; }, 0);
+    note.textContent = t('sig.note', { n: num(total), d: nm(maxD + 1) });
+  }
+
+  // ---------- Constellation (1.2.0): destinations (A) and ports network (B) ----------
+  var TYPE_COLORS = {
+    cargo: '#3a9a4a', tanker: '#c8463a', passenger: '#22a3dd', hsc: '#d9a11e', fishing: '#c27a3c', tug: '#3fa7a3',
+    sailing: '#8a63c9', pleasure: '#d660a8', military: '#5b6b3a', pilot: '#e08a1e', authority: '#1f3f8f', service: '#7d8a96',
+    unknown: '#9a998f', other: '#9a998f', sar_aircraft: '#e04f4f', emergency: '#e04f4f'
+  };
+  var DEST_COLOR = '#5b63c9';
+  var constState = { mode: 'dest', top: 20, req: 0, data: null };
+  function loadConstellation() {
+    var k = state.range;
+    var req = ++constState.req;
+    api('constellation', { mode: constState.mode, top: constState.top, days: range().days }).then(current(k, function (d) {
+      if (req !== constState.req) { return; }
+      constState.data = d;
+      renderConstellation(d);
+    })).catch(fail('constellation'));
+  }
+  function svgEl(name, attrs) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', name);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  function shade(hex, f) {
+    // f > 0 lightens towards white, f < 0 darkens towards black.
+    var n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255];
+    return '#' + c.map(function (v) {
+      v = f > 0 ? v + (255 - v) * f : v * (1 + f);
+      return ('0' + Math.round(v).toString(16)).slice(-2);
+    }).join('');
+  }
+  // Small force layout: springs on links, repulsion and no overlap between bubbles, optional pull to a target
+  // place (ring of destinations) or to the centre. Deterministic, computed at once (no animation).
+  function layout(nodes, links, W, H, pad, charge, gravity) {
+    var i, j, it;
+    for (it = 0; it < 320; it++) {
+      var alpha = 1 - it / 320;
+      links.forEach(function (l) {
+        var a = l.a, b = l.b, dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+        var k = (d - l.len) / d * 0.08 * alpha;
+        if (!a.fixed) { a.x += dx * k; a.y += dy * k; }
+        if (!b.fixed) { b.x -= dx * k; b.y -= dy * k; }
+      });
+      for (i = 0; i < nodes.length; i++) {
+        for (j = i + 1; j < nodes.length; j++) {
+          var p = nodes[i], q = nodes[j], ex = q.x - p.x, ey = q.y - p.y, dd = Math.sqrt(ex * ex + ey * ey) || 0.01;
+          var min = p.r + q.r + pad + (p.label || q.label ? 6 : 0);
+          var push = dd < min ? (min - dd) / dd * 0.5 : (p.repel && q.repel ? charge * alpha / (dd * dd * dd) : 0);
+          if (!push) { continue; }
+          var px = ex * push, py = ey * push;
+          if (p.fixed) { q.x += px * 2; q.y += py * 2; } else if (q.fixed) { p.x -= px * 2; p.y -= py * 2; } else { p.x -= px; p.y -= py; q.x += px; q.y += py; }
+        }
+      }
+      nodes.forEach(function (n) {
+        if (n.fixed) { return; }
+        var tx = n.tx != null ? n.tx : W / 2, ty = n.ty != null ? n.ty : H / 2, g = n.tx != null ? 0.06 : gravity;
+        n.x += (tx - n.x) * g;
+        n.y += (ty - n.y) * g;
+        n.x = Math.max(n.r + 4, Math.min(W - n.r - 4, n.x));
+        n.y = Math.max(n.r + 4, Math.min(H - n.r - 4, n.y));
+      });
+    }
+  }
+  function renderConstellation(d) {
+    var box = $('constellation');
+    var W = Math.max(300, box.clientWidth || 600);
+    var H = Math.round(Math.max(360, Math.min(620, W * (W < 600 ? 1.05 : 0.62))));
+    var small = W < 600;
+    var ports = d.mode === 'ports';
+    var nodes = d.nodes || [];
+    var hint = $('const-hint'), note = $('const-note'), legend = $('const-legend'), list = $('const-list');
+    hint.textContent = t(ports ? 'const.hint_ports' : 'const.hint_dest');
+    box.innerHTML = '';
+    list.innerHTML = '';
+    legend.innerHTML = '';
+    if (!nodes.length) {
+      box.classList.add('empty');
+      box.innerHTML = '<p class="muted">' + esc(t(ports ? 'const.none_ports' : 'const.none_dest')) + '</p>';
+      note.textContent = '';
+      return;
+    }
+    box.classList.remove('empty');
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, class: 'const-svg' });
+    var defs = svgEl('defs');
+    svg.appendChild(defs);
+    var grads = {};
+    function glossy(color) {
+      if (grads[color]) { return grads[color]; }
+      var id = 'cg' + Object.keys(grads).length;
+      var g = svgEl('radialGradient', { id: id, cx: '50%', cy: '50%', r: '60%', fx: '32%', fy: '28%' });
+      [[0, shade(color, 0.65)], [0.5, color], [1, shade(color, -0.35)]].forEach(function (s) {
+        g.appendChild(svgEl('stop', { offset: s[0], 'stop-color': s[1] }));
+      });
+      defs.appendChild(g);
+      grads[color] = 'url(#' + id + ')';
+      return grads[color];
+    }
+    var shadow = svgEl('filter', { id: 'cshadow', x: '-50%', y: '-50%', width: '200%', height: '200%' });
+    shadow.appendChild(svgEl('feDropShadow', { dx: 0, dy: 2, stdDeviation: 2.5, 'flood-color': '#000', 'flood-opacity': 0.28 }));
+    defs.appendChild(shadow);
+    var arrow = svgEl('marker', { id: 'carrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 9, markerHeight: 9, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' });
+    arrow.appendChild(svgEl('path', { d: 'M0,1 L10,5 L0,9 z', fill: css('--text-3') }));
+    defs.appendChild(arrow);
+
+    var max = nodes.reduce(function (m, n) { return Math.max(m, n.n); }, 1);
+    var rMax = small ? 20 : 30, rMin = small ? 6 : 8;
+    var accent = css('--accent');
+    var simNodes = [], simLinks = [], byKey = {};
+    var cx = W / 2, cy = H / 2;
+    var total = 0;
+    nodes.forEach(function (n) { total += n.n; });
+    if (!ports) {
+      var station = { key: '_station', x: cx, y: cy, r: small ? 18 : 24, fixed: true, color: accent, label: cfg.station.name || 'AIS' };
+      simNodes.push(station);
+      var ring = Math.min(W, H) * (small ? 0.3 : 0.32);
+      // Wide screens: an ellipse uses the width of the card.
+      var sx = small ? 1 : Math.min(1.6, Math.max(1, W / H * 0.85));
+      nodes.forEach(function (n, i) {
+        var ang = -Math.PI / 2 + i * 2 * Math.PI / nodes.length;
+        var r = rMin + (rMax - rMin) * Math.sqrt(n.n / max);
+        var dn = { key: n.key, d: n, x: cx + Math.cos(ang) * ring * sx, y: cy + Math.sin(ang) * ring, tx: cx + Math.cos(ang) * ring * sx,
+          ty: cy + Math.sin(ang) * ring, r: r, color: DEST_COLOR, label: n.label, repel: true };
+        simNodes.push(dn);
+        simLinks.push({ a: station, b: dn, len: ring * (1 + (sx - 1) * Math.abs(Math.cos(ang))), n: n.n });
+        var types = n.types.slice(0, nodes.length > 10 || small ? 3 : 5);
+        var tmax = n.types[0] ? n.types[0].n : 1;
+        types.forEach(function (ty, k) {
+          var spread = (k - (types.length - 1) / 2) * (small ? 0.22 : 0.18);
+          var dist = ring + r + (small ? 22 : 34);
+          var tn = { key: n.key + '|' + ty.cat, d: ty, parent: n, x: cx + Math.cos(ang + spread) * dist * sx, y: cy + Math.sin(ang + spread) * dist,
+            tx: cx + Math.cos(ang + spread) * (dist + (sx - 1) * ring) , ty: cy + Math.sin(ang + spread) * dist, r: (small ? 3 : 4) + (small ? 6 : 9) * Math.sqrt(ty.n / tmax),
+            color: TYPE_COLORS[ty.cat] || TYPE_COLORS.other };
+          simNodes.push(tn);
+          simLinks.push({ a: dn, b: tn, len: r + tn.r + (small ? 10 : 16), n: ty.n, type: true });
+        });
+      });
+    } else {
+      var ringP = Math.min(W, H) * 0.36;
+      nodes.forEach(function (n, i) {
+        var ang = -Math.PI / 2 + i * 2 * Math.PI / nodes.length;
+        var pn = { key: n.key, d: n, x: cx + Math.cos(ang) * ringP * (i % 2 ? 0.7 : 1), y: cy + Math.sin(ang) * ringP * (i % 2 ? 0.7 : 1),
+          r: rMin + (rMax - rMin) * Math.sqrt(n.n / max), color: DEST_COLOR, label: n.label, repel: true };
+        byKey[n.key] = pn;
+        simNodes.push(pn);
+      });
+      (d.links || []).forEach(function (l) {
+        if (byKey[l.from] && byKey[l.to]) { simLinks.push({ a: byKey[l.from], b: byKey[l.to], len: small ? 90 : 150, n: l.n, dir: true }); }
+      });
+    }
+    layout(simNodes, simLinks, W, H, small ? 3 : 6, ports ? (small ? 4000 : 12000) : 900, ports ? 0.005 : 0.012);
+
+    // Links first, under the bubbles.
+    var lmax = simLinks.reduce(function (m, l) { return Math.max(m, l.n); }, 1);
+    var gl = svgEl('g', { class: 'const-links' });
+    simLinks.forEach(function (l) {
+      var a = l.a, b = l.b, w = (l.type ? 0.8 : 1.2) + (l.type ? 3 : 6) * l.n / lmax;
+      var el;
+      if (l.dir) {
+        // Curved, so that A→B and B→A stay apart; the arrow stops at the bubble's edge.
+        var dx = b.x - a.x, dy = b.y - a.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var mx = (a.x + b.x) / 2 - dy / len * len * 0.15, my = (a.y + b.y) / 2 + dx / len * len * 0.15;
+        var ex = b.x - mx, ey = b.y - my, el2 = Math.sqrt(ex * ex + ey * ey) || 1;
+        var tx = b.x - ex / el2 * (b.r + 2), ty = b.y - ey / el2 * (b.r + 2);
+        el = svgEl('path', { d: 'M' + a.x.toFixed(1) + ',' + a.y.toFixed(1) + ' Q' + mx.toFixed(1) + ',' + my.toFixed(1) + ' ' + tx.toFixed(1) + ',' + ty.toFixed(1),
+          fill: 'none', stroke: css('--text-3'), 'stroke-width': w.toFixed(1), 'stroke-opacity': 0.55, 'marker-end': 'url(#carrow)', class: 'const-link',
+          'data-list': 'link', 'data-from': a.key, 'data-to': b.key, 'data-title': a.d.label + ' → ' + b.d.label, tabindex: 0, role: 'button',
+          'aria-label': t('const.link_aria', { a: a.d.label, b: b.d.label, n: num(l.n) }) });
+        var tt = svgEl('title');
+        tt.textContent = t('const.link_aria', { a: a.d.label, b: b.d.label, n: num(l.n) });
+        el.appendChild(tt);
+        // Wider invisible stroke: easier to hover and tap.
+        var hit = svgEl('path', { d: el.getAttribute('d'), fill: 'none', stroke: 'transparent', 'stroke-width': 12 });
+        var g2 = svgEl('g', { class: 'const-linkhit' });
+        g2.appendChild(hit);
+        g2.appendChild(el);
+        gl.appendChild(g2);
+        return;
+      }
+      el = svgEl('line', { x1: a.x.toFixed(1), y1: a.y.toFixed(1), x2: b.x.toFixed(1), y2: b.y.toFixed(1),
+        stroke: l.type ? b.color : css('--text-3'), 'stroke-width': w.toFixed(1), 'stroke-opacity': l.type ? 0.6 : 0.35 });
+      gl.appendChild(el);
+    });
+    svg.appendChild(gl);
+
+    var gn = svgEl('g', { class: 'const-nodes' });
+    simNodes.forEach(function (n) {
+      var g = svgEl('g', { class: 'const-node' + (n.key === '_station' ? ' station' : '') });
+      var title = '';
+      if (n.key === '_station') {
+        title = n.label;
+      } else if (n.parent) {
+        title = n.parent.label + ' · ' + t('type.' + n.d.cat) + ' : ' + t('rec.vessels', { n: num(n.d.n) });
+        g.setAttribute('data-list', 'dest');
+        g.setAttribute('data-value', n.parent.key);
+        g.setAttribute('data-type', n.d.cat);
+        g.setAttribute('data-title', n.parent.label + ' · ' + t('type.' + n.d.cat));
+      } else {
+        title = n.d.label + ' : ' + t('rec.vessels', { n: num(n.d.n) }) + (total ? ' (' + Math.round(n.d.n * 100 / total) + NB + '%)' : '');
+        g.setAttribute('data-list', 'dest');
+        g.setAttribute('data-value', n.d.key);
+        g.setAttribute('data-title', n.d.label);
+      }
+      if (g.hasAttribute('data-list')) {
+        g.setAttribute('tabindex', '0');
+        g.setAttribute('role', 'button');
+        g.setAttribute('aria-label', title);
+      }
+      var tt = svgEl('title');
+      tt.textContent = title;
+      g.appendChild(tt);
+      g.appendChild(svgEl('circle', { cx: n.x.toFixed(1), cy: n.y.toFixed(1), r: n.r.toFixed(1), fill: glossy(n.color), filter: 'url(#cshadow)' }));
+      // Specular highlight: the "relief" of the bubble.
+      if (n.r >= 6) {
+        g.appendChild(svgEl('ellipse', { cx: (n.x - n.r * 0.3).toFixed(1), cy: (n.y - n.r * 0.38).toFixed(1), rx: (n.r * 0.42).toFixed(1),
+          ry: (n.r * 0.24).toFixed(1), fill: '#fff', 'fill-opacity': 0.35, transform: 'rotate(-25 ' + (n.x - n.r * 0.3).toFixed(1) + ' ' + (n.y - n.r * 0.38).toFixed(1) + ')' }));
+      }
+      if (n.label) {
+        // Label outside the bubble, on the side away from the centre.
+        var right = n.key === '_station' ? null : n.x >= cx;
+        var txt = svgEl('text', {
+          x: (right === null ? n.x : n.x + (right ? 1 : -1) * (n.r + 4)).toFixed(1),
+          y: (right === null ? n.y + n.r + 14 : n.y + 4).toFixed(1),
+          'text-anchor': right === null ? 'middle' : (right ? 'start' : 'end'), class: 'const-label' + (right === null ? ' station' : '')
+        });
+        txt.textContent = n.label.length > 18 ? n.label.slice(0, 17) + '…' : n.label;
+        g.appendChild(txt);
+      }
+      gn.appendChild(g);
+    });
+    svg.appendChild(gn);
+    box.appendChild(svg);
+
+    // Legend of the vessel types shown, and the accessible list.
+    if (!ports) {
+      var seen = {};
+      simNodes.forEach(function (n) { if (n.parent) { seen[n.d.cat] = 1; } });
+      legend.innerHTML = Object.keys(seen).map(function (c) {
+        return '<li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5.5" fill="' + (TYPE_COLORS[c] || TYPE_COLORS.other) + '"/></svg>' + esc(t('type.' + c)) + '</li>';
+      }).join('');
+      list.innerHTML = nodes.map(function (n) {
+        return '<li class="clickable" tabindex="0" role="button" data-list="dest" data-value="' + esc(n.key) + '" data-title="' + esc(n.label) + '">' +
+          '<span class="route-name">' + esc(n.label) + '</span><span class="val">' + esc(t('rec.vessels', { n: num(n.n) })) + ' · ' +
+          esc(n.types.slice(0, 4).map(function (ty) { return t('type.' + ty.cat) + ' ' + num(ty.n); }).join(', ')) + '</span></li>';
+      }).join('');
+      var parts = [t('const.note_dest', { n: num(total) })];
+      if (d.others) { parts.push(t('const.others', { n: num(d.others) })); }
+      if (d.unknown) { parts.push(t('const.unknown', { n: num(d.unknown) })); }
+      note.textContent = parts.join(' · ');
+    } else {
+      list.innerHTML = (d.links || []).map(function (l) {
+        var a = byKey[l.from], b = byKey[l.to];
+        if (!a || !b) { return ''; }
+        return '<li class="clickable" tabindex="0" role="button" data-list="link" data-from="' + esc(l.from) + '" data-to="' + esc(l.to) + '" data-title="' + esc(a.d.label + ' → ' + b.d.label) + '">' +
+          '<span class="route-name">' + esc(a.d.label) + '<span class="arrow">→</span>' + esc(b.d.label) + '</span><span class="val">' + esc(t('rec.vessels', { n: num(l.n) })) + '</span></li>';
+      }).join('');
+      note.textContent = d.since ? t('const.since', { d: fmtDate.format(new Date(d.since * 1000)) }) + (d.others ? ' · ' + t('const.others', { n: num(d.others) }) : '') : '';
+    }
+  }
+  function constSeg(id, attr, apply) {
+    $(id).addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) { return; }
+      Array.prototype.forEach.call(this.querySelectorAll('button'), function (x) {
+        x.classList.toggle('on', x === b);
+        x.setAttribute('aria-pressed', String(x === b));
+      });
+      apply(b.getAttribute(attr));
+      loadConstellation();
+    });
+  }
+  constSeg('const-mode', 'data-mode', function (v) { constState.mode = v === 'ports' ? 'ports' : 'dest'; });
+  constSeg('const-top', 'data-top', function (v) { constState.top = Number(v) || 20; });
+  $('signal-sector').addEventListener('change', function () { if (last.signal) { renderSignal(last.signal); } });
+  var constW = 0;
+  window.addEventListener('resize', function () {
+    clearTimeout(constW);
+    constW = setTimeout(function () { if (constState.data) { renderConstellation(constState.data); } }, 200);
+  });
+
   // ---------- Loading ----------
   var last = {};
   function fail(id) { return function (err) { console.error(id, err); }; }
@@ -1191,6 +1571,8 @@
     api('heatmap', { days: days }).then(current(k, function (d) { last.heatmap = d; renderHeatmap(d); })).catch(fail('heatmap'));
     api('uptime', { days: days }).then(current(k, function (d) { renderUptime(d); })).catch(fail('uptime'));
     loadTop();
+    loadSignal();
+    loadConstellation();
   }
   function stamp() { $('updated').textContent = t('refresh.at', { t: fmtHour.format(new Date()) }); }
   function rerender() {
@@ -1200,6 +1582,8 @@
     if (last.polar) { renderPolar(last.polar); }
     if (last.routes) { renderRoutes(last.routes); }
     if (last.heatmap) { renderHeatmap(last.heatmap); }
+    if (last.signal) { renderSignal(last.signal); }
+    if (constState.data) { renderConstellation(constState.data); }
   }
 
   chartTheme();
@@ -1207,7 +1591,13 @@
   loadCounts();
   loadRemarkable();
   loadPeriodWidgets();
+  loadRecords();
   stamp();
+  // Link from an alert (1.2.0): ?mmsi=123456789 opens that vessel's card.
+  (function () {
+    var m = /[?&]mmsi=(\d{1,9})(?:&|$)/.exec(location.search);
+    if (m) { openVessel(m[1]); }
+  })();
   // Status and key figures every minute, everything else every 5 minutes (skipped while the tab is hidden).
   var ticks = 0;
   setInterval(function () {
@@ -1215,6 +1605,7 @@
     ticks++;
     loadSummary();
     if (ticks % 5 === 0) {
+      loadRecords();
       loadCounts();
       loadRemarkable();
       loadPeriodWidgets();
@@ -1226,7 +1617,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { hiddenAt = Date.now(); return; }
     if (hiddenAt && Date.now() - hiddenAt > 5 * 60000) {
-      loadSummary(); loadCounts(); loadRemarkable(); loadPeriodWidgets(); stamp();
+      loadSummary(); loadCounts(); loadRemarkable(); loadPeriodWidgets(); loadRecords(); stamp();
     }
   });
 })();

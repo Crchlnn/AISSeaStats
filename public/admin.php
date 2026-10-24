@@ -12,6 +12,8 @@ use AISSeaStats\DebugLog;
 use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
 use AISSeaStats\LoginGuard;
+use AISSeaStats\MqttPublisher;
+use AISSeaStats\Notify;
 use AISSeaStats\Page;
 use AISSeaStats\Rules;
 use AISSeaStats\Settings;
@@ -30,6 +32,9 @@ $flash = [];
 $newToken = null;
 $alertTest = null;
 $alertDraft = null;
+$mqttTest = null;
+$mqttDraft = null;
+$notifyTest = null;
 $action = (string) ($_POST['action'] ?? '');
 
 // ---------- Login / logout ----------
@@ -118,6 +123,10 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     || !in_array($tz, Page::timezones(), true)) {
                     throw new InvalidArgumentException(I18n::t('admin.invalid'));
                 }
+                $publicUrl = rtrim(trim((string) ($_POST['public_url'] ?? '')), '/');
+                if ($publicUrl !== '' && (!Alert::validUrl($publicUrl) || strlen($publicUrl) > 200)) {
+                    throw new InvalidArgumentException(I18n::t('admin.public_url_invalid'));
+                }
                 $tiles = trim((string) ($_POST['map_tiles'] ?? ''));
                 if (!preg_match('~^https://[A-Za-z0-9.{}\-]+(:\d+)?/[^\s"\'<>]*\{z\}[^\s"\'<>]*$~', $tiles)) {
                     throw new InvalidArgumentException(I18n::t('admin.invalid_tiles'));
@@ -134,6 +143,7 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 Settings::set('public_position_round', isset($_POST['public_position_round']));
                 Settings::set('map_tiles', $tiles);
                 Settings::set('map_attribution', mb_substr(strip_tags((string) ($_POST['map_attribution'] ?? '')), 0, 200));
+                Settings::set('public_url', $publicUrl);
                 $flash[] = ['ok', I18n::t('admin.saved')];
                 break;
 
@@ -195,6 +205,9 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 session_regenerate_id(true);
                 $_SESSION['admin_hash'] = substr((string) Settings::get('admin_hash'), -16);
                 $flash[] = ['ok', I18n::t('admin.password_changed')];
+                if (mb_strlen($p) < 8) { // 1.2.0: a warning only, the owner keeps the choice (no minimum since 1.1.5)
+                    $flash[] = ['warn', I18n::t('admin.password_short')];
+                }
                 break;
 
             case 'delete_mmsi':
@@ -263,6 +276,42 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 Settings::set('alerts', $cfg);
                 if (isset($_POST['test'])) {
                     $alertTest = Alert::configured($cfg) === [] ? [] : Alert::test();
+                } else {
+                    $flash[] = ['ok', I18n::t('admin.alert_saved')];
+                }
+                break;
+
+            case 'mqtt':
+                try {
+                    $mc = MqttPublisher::fromForm($_POST, MqttPublisher::config());
+                } catch (InvalidArgumentException $e) {
+                    $mqttDraft = array_merge(MqttPublisher::config(), array_intersect_key([
+                        'enabled' => isset($_POST['mqtt_enabled']), 'host' => (string) ($_POST['mqtt_host'] ?? ''),
+                        'port' => (int) ($_POST['mqtt_port'] ?? 1883), 'tls' => isset($_POST['mqtt_tls']), 'tls_verify' => isset($_POST['mqtt_tls_verify']),
+                        'user' => (string) ($_POST['mqtt_user'] ?? ''), 'prefix' => (string) ($_POST['mqtt_prefix'] ?? ''),
+                        'discovery' => isset($_POST['mqtt_discovery']), 'discovery_prefix' => (string) ($_POST['mqtt_discovery_prefix'] ?? ''),
+                    ], MqttPublisher::defaults()));
+                    throw new InvalidArgumentException(I18n::t('admin.alert_invalid', ['f' => I18n::t('admin.mqtt_f_' . $e->getMessage())]));
+                }
+                Settings::set('mqtt', $mc);
+                if (isset($_POST['test'])) {
+                    $mqttTest = $mc['host'] === '' ? I18n::t('admin.mqtt_no_host') : (MqttPublisher::test($mc) ?? '');
+                } else {
+                    $flash[] = ['ok', I18n::t('admin.alert_saved')];
+                }
+                break;
+
+            case 'notify':
+                try {
+                    $nc = Notify::fromForm($_POST);
+                } catch (InvalidArgumentException $e) {
+                    throw new InvalidArgumentException(I18n::t('admin.notify_bad_time'));
+                }
+                Settings::set('notify', $nc);
+                if (isset($_POST['test_summary'])) {
+                    $tz = Settings::timezone();
+                    $local = (new DateTimeImmutable('now', $tz));
+                    $notifyTest = Notify::sendSummary(Alert::config(), 'daily', $local->setTime(0, 0), $local, time());
                 } else {
                     $flash[] = ['ok', I18n::t('admin.alert_saved')];
                 }
@@ -356,6 +405,11 @@ $photos = Db::all('SELECT p.mmsi, p.credit, p.uploaded_at, p.width, p.height, LE
 $photoMmsi = preg_match('/^\d{1,9}$/', (string) ($_GET['photo_mmsi'] ?? '')) ? (string) $_GET['photo_mmsi'] : '';
 $s = Settings::all();
 $ac = $alertDraft ?? Alert::config();
+$mc = $mqttDraft ?? MqttPublisher::config();
+$ms = Settings::get('mqtt_status');
+$nc = Notify::config();
+$nlog = Notify::log();
+$readyCh = Notify::channels('test', $ac);
 $r = (array) $s['rules'];
 $ago = static function (?int $ts) use ($now): string {
     if (!$ts) {
@@ -369,10 +423,12 @@ $csrf = Web::e(Web::csrfToken());
 $form = static fn (string $action): string => '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="' . $action . '">';
 
 Page::open(I18n::t('nav.admin'), true);
-// Messages of the alerts form are shown in its own card (the form returns to #alerts).
+// Messages of the alerts, MQTT, notifications and debug forms are shown in their own card (the form returns there).
 $alertFlash = $action === 'alerts' ? $flash : [];
+$mqttFlash = $action === 'mqtt' ? $flash : [];
+$notifyFlash = $action === 'notify' ? $flash : [];
 $debugFlash = str_starts_with($action, 'debug_') ? $flash : [];
-foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flash as [$k, $m]) {
+foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_with($action, 'debug_') ? [] : $flash as [$k, $m]) {
     echo '<p class="notice ' . $k . '">' . Web::e($m) . '</p>';
 }
 ?>
@@ -449,6 +505,9 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
         <span class="help"><?= $t('admin.retention_help') ?></span></div>
     </div>
     <label class="check"><input type="checkbox" name="enrich_enabled"<?= $s['enrich_enabled'] ? ' checked' : '' ?>> <?= $t('admin.enrich') ?></label>
+    <div class="field"><label for="public_url"><?= $t('admin.public_url') ?></label>
+      <input id="public_url" name="public_url" type="url" maxlength="200" value="<?= Web::e((string) $s['public_url']) ?>" placeholder="https://ais.example.org">
+      <span class="help"><?= $t('admin.public_url_help') ?></span></div>
     <div class="field"><label for="map_tiles"><?= $t('admin.tiles') ?></label>
       <input id="map_tiles" name="map_tiles" value="<?= Web::e($s['map_tiles']) ?>"></div>
     <div class="field"><label for="map_attribution"><?= $t('admin.attribution') ?></label>
@@ -557,6 +616,127 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
   </form>
 </section>
 
+<section class="card" id="mqtt">
+  <h2><?= $t('admin.mqtt') ?></h2>
+  <p class="muted small"><?= $t('admin.mqtt_help') ?></p>
+  <?php foreach ($mqttFlash as [$k, $m]): ?><p class="notice <?= $k ?>"><?= Web::e($m) ?></p><?php endforeach; ?>
+  <?php if ($mqttTest !== null): ?>
+    <p class="notice <?= $mqttTest === '' ? 'ok' : 'err' ?>"><b>MQTT</b> : <?= $mqttTest === '' ? $t('admin.mqtt_test_ok', ['t' => MqttPublisher::base($mc) . '/event']) : Web::e($mqttTest) ?></p>
+  <?php endif; ?>
+  <p class="small">
+    <?php if (!MqttPublisher::ready($mc)): ?><?= $t('admin.alert_state_off') ?>
+    <?php elseif (is_array($ms) && $ms['error'] !== null): ?><span class="dot critical"></span><?= $t('admin.mqtt_state_err', ['a' => $ago((int) $ms['ts'])]) ?> <span class="err-text"><?= Web::e((string) $ms['error']) ?></span>
+    <?php elseif (is_array($ms) && $heartbeat > 0 && (int) $ms['ts'] >= $heartbeat - 900): ?><span class="dot good"></span><?= $t('admin.mqtt_state_ok', ['t' => MqttPublisher::base($mc)]) ?>
+    <?php else: ?><span class="dot warning"></span><?= $t('admin.mqtt_state_wait') ?>
+    <?php endif; ?>
+  </p>
+  <form method="post" action="admin.php#mqtt" autocomplete="off"><?= $form('mqtt') ?>
+    <label class="check"><input type="checkbox" name="mqtt_enabled"<?= $mc['enabled'] ? ' checked' : '' ?>> <?= $t('admin.mqtt_enabled') ?></label>
+    <div class="row">
+      <div class="field"><label for="mqtt_host"><?= $t('admin.mqtt_host') ?></label>
+        <input id="mqtt_host" name="mqtt_host" maxlength="253" value="<?= Web::e((string) $mc['host']) ?>" placeholder="192.168.1.10 / homeassistant.local"></div>
+      <div class="field"><label for="mqtt_port"><?= $t('admin.alert_smtp_port') ?></label>
+        <input id="mqtt_port" name="mqtt_port" type="number" min="1" max="65535" value="<?= (int) $mc['port'] ?>"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="mqtt_tls"<?= $mc['tls'] ? ' checked' : '' ?>> <?= $t('admin.mqtt_tls') ?></label>
+    <label class="check"><input type="checkbox" name="mqtt_tls_verify"<?= $mc['tls_verify'] ? ' checked' : '' ?>> <?= $t('admin.mqtt_tls_verify') ?></label>
+    <div class="row">
+      <div class="field"><label for="mqtt_user"><?= $t('admin.alert_smtp_user') ?></label>
+        <input id="mqtt_user" name="mqtt_user" maxlength="120" autocomplete="off" value="<?= Web::e((string) $mc['user']) ?>" placeholder="<?= $t('admin.alert_optional') ?>"></div>
+      <div class="field"><label for="mqtt_pass"><?= $t('admin.alert_smtp_pass') ?></label>
+        <input id="mqtt_pass" name="mqtt_pass" type="password" autocomplete="new-password" placeholder="<?= $mc['pass'] !== '' ? $t('admin.alert_secret_set') : $t('admin.alert_optional') ?>">
+        <?php if ($mc['pass'] !== ''): ?><label class="check small"><input type="checkbox" name="mqtt_pass_clear"> <?= $t('admin.alert_clear') ?></label><?php endif; ?></div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="mqtt_prefix"><?= $t('admin.mqtt_prefix') ?></label>
+        <input id="mqtt_prefix" name="mqtt_prefix" maxlength="60" value="<?= Web::e((string) $mc['prefix']) ?>">
+        <span class="help"><?= $t('admin.mqtt_prefix_help', ['t' => MqttPublisher::base($mc)]) ?></span></div>
+      <div class="field"><label for="mqtt_discovery_prefix"><?= $t('admin.mqtt_discovery_prefix') ?></label>
+        <input id="mqtt_discovery_prefix" name="mqtt_discovery_prefix" maxlength="60" value="<?= Web::e((string) $mc['discovery_prefix']) ?>"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="mqtt_discovery"<?= $mc['discovery'] ? ' checked' : '' ?>> <?= $t('admin.mqtt_discovery') ?></label>
+    <p class="help muted small"><?= $t('admin.mqtt_topics') ?></p>
+    <p><button class="btn" type="submit"><?= $t('admin.save') ?></button>
+      <button class="btn secondary" type="submit" name="test" value="1"><?= $t('admin.alert_test') ?></button></p>
+  </form>
+</section>
+
+<section class="card" id="notify">
+  <h2><?= $t('admin.notify') ?></h2>
+  <p class="muted small"><?= $t('admin.notify_help') ?></p>
+  <?php foreach ($notifyFlash as [$k, $m]): ?><p class="notice <?= $k ?>"><?= Web::e($m) ?></p><?php endforeach; ?>
+  <?php if ($notifyTest !== null): ?>
+    <?php if ($notifyTest === []): ?><p class="notice err"><?= $t('admin.notify_no_channel') ?></p><?php endif; ?>
+    <?php foreach ($notifyTest as $ch => $err): ?>
+      <p class="notice <?= $err === null ? 'ok' : 'err' ?>"><b><?= $t('admin.alert_ch_' . $ch) ?></b> : <?= $err === null ? $t('admin.alert_test_ok') : Web::e($err) ?></p>
+    <?php endforeach; ?>
+  <?php endif; ?>
+  <form method="post" action="admin.php#notify" autocomplete="off"><?= $form('notify') ?>
+    <fieldset class="alert-ch"><legend><?= $t('admin.notify_vessels') ?></legend>
+      <label class="check"><input type="checkbox" name="notify_vessel"<?= $nc['vessel_enabled'] ? ' checked' : '' ?>> <?= $t('admin.notify_vessel_enabled') ?></label>
+      <p class="help"><?= $t('admin.notify_triggers_help') ?></p>
+      <div class="check-grid">
+        <?php foreach (Notify::TRIGGERS as $tr): ?>
+          <label class="check"><input type="checkbox" name="trig_<?= $tr ?>"<?= $nc['triggers'][$tr] ? ' checked' : '' ?>>
+            <?= $t(in_array($tr, Rules::TAGS, true) ? 'tag.' . $tr : 'notify.t_' . $tr) ?><?php if ($tr !== 'watchlist' && in_array($tr, Rules::TAGS, true) && empty($r[$tr])): ?> <span class="muted small">(<?= $t('admin.notify_rule_off') ?>)</span><?php endif; ?></label>
+        <?php endforeach; ?>
+      </div>
+      <label class="check"><input type="checkbox" name="quiet_enabled"<?= $nc['quiet']['enabled'] ? ' checked' : '' ?>> <?= $t('admin.notify_quiet') ?></label>
+      <div class="row">
+        <div class="field"><label for="quiet_from"><?= $t('admin.notify_from') ?></label>
+          <input id="quiet_from" name="quiet_from" type="time" value="<?= Web::e((string) $nc['quiet']['from']) ?>"></div>
+        <div class="field"><label for="quiet_to"><?= $t('admin.notify_to') ?></label>
+          <input id="quiet_to" name="quiet_to" type="time" value="<?= Web::e((string) $nc['quiet']['to']) ?>"></div>
+        <div class="field"><label for="max_per_hour"><?= $t('admin.notify_cap') ?></label>
+          <input id="max_per_hour" name="max_per_hour" type="number" min="1" max="120" value="<?= (int) $nc['max_per_hour'] ?>"></div>
+      </div>
+      <p class="help"><?= $t('admin.notify_quiet_help') ?></p>
+    </fieldset>
+
+    <fieldset class="alert-ch"><legend><?= $t('admin.notify_summaries') ?></legend>
+      <label class="check"><input type="checkbox" name="sum_daily"<?= $nc['summary']['daily'] ? ' checked' : '' ?>> <?= $t('admin.notify_daily') ?></label>
+      <div class="row">
+        <div class="field"><label for="sum_daily_at"><?= $t('admin.notify_at') ?></label>
+          <input id="sum_daily_at" name="sum_daily_at" type="time" value="<?= Web::e((string) $nc['summary']['daily_at']) ?>"></div>
+      </div>
+      <label class="check"><input type="checkbox" name="sum_weekly"<?= $nc['summary']['weekly'] ? ' checked' : '' ?>> <?= $t('admin.notify_weekly') ?></label>
+      <div class="row">
+        <div class="field"><label for="sum_weekly_day"><?= $t('admin.notify_day') ?></label>
+          <select id="sum_weekly_day" name="sum_weekly_day"><?php for ($d = 1; $d <= 7; $d++): ?>
+            <option value="<?= $d ?>"<?= (int) $nc['summary']['weekly_day'] === $d ? ' selected' : '' ?>><?= $t('day.' . $d) ?></option><?php endfor; ?></select></div>
+        <div class="field"><label for="sum_weekly_at"><?= $t('admin.notify_at') ?></label>
+          <input id="sum_weekly_at" name="sum_weekly_at" type="time" value="<?= Web::e((string) $nc['summary']['weekly_at']) ?>"></div>
+      </div>
+    </fieldset>
+
+    <fieldset class="alert-ch"><legend><?= $t('admin.notify_routes') ?></legend>
+      <p class="help"><?= $t('admin.notify_routes_help') ?></p>
+      <div class="table-scroll"><table class="table route-grid">
+        <thead><tr><th></th><?php foreach (Notify::CHANNELS as $ch): ?><th<?= in_array($ch, $readyCh, true) ? '' : ' class="muted"' ?>><?= $t('admin.alert_ch_' . $ch) ?></th><?php endforeach; ?></tr></thead>
+        <tbody><?php foreach (Notify::KINDS as $kind): ?>
+          <tr><th scope="row"><?= $t('admin.notify_kind_' . $kind) ?></th>
+          <?php foreach (Notify::CHANNELS as $ch): ?><td><input type="checkbox" name="route_<?= $kind ?>_<?= $ch ?>" aria-label="<?= $t('admin.notify_kind_' . $kind) ?> – <?= $t('admin.alert_ch_' . $ch) ?>"<?= in_array($ch, $nc['routes'][$kind], true) ? ' checked' : '' ?>></td><?php endforeach; ?></tr>
+        <?php endforeach; ?></tbody>
+      </table></div>
+      <?php if (count($readyCh) < count(Notify::CHANNELS)): ?><p class="help muted"><?= $t('admin.notify_routes_greyed') ?></p><?php endif; ?>
+    </fieldset>
+    <p><button class="btn" type="submit"><?= $t('admin.save') ?></button>
+      <button class="btn secondary" type="submit" name="test_summary" value="1"><?= $t('admin.notify_test_summary') ?></button></p>
+  </form>
+
+  <h3><?= $t('admin.notify_log') ?></h3>
+  <?php if ($nlog === []): ?><p class="muted small"><?= $t('admin.notify_log_empty') ?></p><?php else: ?>
+  <div class="table-scroll"><table class="table notify-log">
+    <thead><tr><th><?= $t('admin.notify_when') ?></th><th><?= $t('admin.notify_what') ?></th><th><?= $t('admin.notify_result') ?></th></tr></thead>
+    <tbody><?php foreach ($nlog as $row): $res = (string) $row['results']; ?>
+      <tr><td class="nowrap"><?= Web::e((new DateTimeImmutable('@' . (int) $row['ts']))->setTimezone(Settings::timezone())->format('d/m H:i')) ?></td>
+        <td><?php if ((int) $row['mmsi'] > 0): ?><a href="./?mmsi=<?= (int) $row['mmsi'] ?>"><?= Web::e((string) $row['title']) ?></a><?php else: ?><?= Web::e((string) $row['title']) ?><?php endif; ?></td>
+        <td class="small"><?php if (in_array($res, ['ok', 'quiet', 'capped', 'none'], true)): ?><?= $t('admin.notify_res_' . $res) ?><?php else: ?><span class="err-text"><?= Web::e($res) ?></span><?php endif; ?></td></tr>
+    <?php endforeach; ?></tbody>
+  </table></div>
+  <?php endif; ?>
+</section>
+
 <section class="card">
   <h2><?= $t('admin.rules') ?></h2>
   <p class="muted small"><?= $t('admin.rules_help') ?></p>
@@ -580,7 +760,7 @@ foreach ($action === 'alerts' || str_starts_with($action, 'debug_') ? [] : $flas
     </div>
     <div class="field"><label for="military_prefixes"><?= $t('admin.military_prefixes') ?></label>
       <textarea id="military_prefixes" name="military_prefixes"><?= Web::e(implode("\n", (array) $r['military_prefixes'])) ?></textarea>
-      <span class="help"><?= $t('admin.military_prefixes_help') ?></span></div>
+      <span class="help"><?= $t('admin.military_prefixes_help') ?> <?= $t('admin.military_no_block') ?></span></div>
     <div class="field"><label for="watchlist"><?= $t('admin.watchlist') ?></label>
       <textarea id="watchlist" name="watchlist"><?= Web::e(implode("\n", (array) $r['watchlist'])) ?></textarea>
       <span class="help"><?= $t('admin.watchlist_help') ?></span></div>

@@ -183,6 +183,54 @@ $t = static fn (string $k): string => Web::e(I18n::t($k));
     </section>
   </div>
 
+  <section class="card" id="constellation-card">
+    <div class="card-head">
+      <h2><?= $t('const.title') ?></h2>
+      <div class="card-tools">
+        <div class="seg small" id="const-mode" role="group" aria-label="<?= $t('const.mode') ?>">
+          <button type="button" data-mode="dest" class="on" aria-pressed="true"><?= $t('const.dest') ?></button>
+          <button type="button" data-mode="ports" aria-pressed="false"><?= $t('const.ports') ?></button>
+        </div>
+        <div class="seg small" id="const-top" role="group" aria-label="<?= $t('const.top') ?>">
+          <button type="button" data-top="10">10</button>
+          <button type="button" data-top="20" class="on" aria-pressed="true">20</button>
+          <button type="button" data-top="30">30</button>
+        </div>
+      </div>
+    </div>
+    <p class="muted small" id="const-hint"></p>
+    <div class="constellation" id="constellation" role="img" aria-describedby="const-hint"></div>
+    <ul class="const-legend" id="const-legend" aria-label="<?= $t('const.legend') ?>"></ul>
+    <p class="muted small" id="const-note"></p>
+    <details class="const-alt">
+      <summary><?= $t('const.as_list') ?></summary>
+      <ol class="rank compact" id="const-list"></ol>
+    </details>
+  </section>
+
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <h2><?= $t('rec.title') ?></h2>
+        <span class="muted small" id="records-since"></span>
+      </div>
+      <ul class="records" id="records"></ul>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2><?= $t('sig.title') ?></h2>
+        <select id="signal-sector" class="sig-sector" aria-label="<?= $t('sig.sector') ?>">
+            <option value=""><?= $t('sig.all_dirs') ?></option>
+            <?php foreach (['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as $i => $d): ?><option value="<?= $i ?>"><?= Web::e(I18n::t('sig.compare', ['d' => I18n::t('dir.' . $d) . ' (' . ($i * 45) . '°)'])) ?></option><?php endforeach; ?>
+        </select>
+      </div>
+      <div class="chart-wrap"><canvas id="chart-signal" role="img" aria-label="<?= $t('sig.title') ?>"></canvas></div>
+      <p class="muted small" id="signal-note"></p>
+      <p class="muted small"><?= $t('sig.hint') ?></p>
+    </section>
+  </div>
+
   <section class="card">
     <div class="card-head">
       <h2><?= $t('up.title') ?></h2>

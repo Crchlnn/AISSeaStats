@@ -29,12 +29,15 @@ jobs:
           coverage: none
       - name: Lint PHP
         run: find . -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+      - name: MQTT broker for the tests (Mosquitto, local connections only)
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends mosquitto && sudo systemctl start mosquitto
       - name: Tests
         env:
           DB_HOST: 127.0.0.1
           DB_NAME: aisseastats_test
           DB_USER: test
           DB_PASSWORD: test
+          MQTT_TEST_HOST: 127.0.0.1
         run: php tests/run.php
       - name: Smoke test (setup wizard, admin login, ingestion)
         env:
@@ -44,7 +47,7 @@ jobs:
           DB_PASSWORD: test
         run: sh tests/smoke.sh
       - name: Shellcheck
-        run: shellcheck install.sh docker/entrypoint.sh tests/smoke.sh
+        run: shellcheck install.sh docker/entrypoint.sh tests/smoke.sh tests/stack.sh
 
   docker:
     runs-on: ubuntu-24.04
@@ -61,3 +64,33 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # 1.2.0: the real stack (MariaDB, web, worker) started with Docker Compose and tested end to end.
+  # "hardened" adds docker-compose.hardened.yml; it does not fail the build until it has been validated.
+  stack:
+    runs-on: ubuntu-24.04
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, hardened]
+    continue-on-error: ${{ matrix.variant == 'hardened' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the image
+        run: docker build -t ghcr.io/crchlnn/aisseastats:ci .
+      - name: Start the stack
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          printf 'DB_PASSWORD=ci-db-pass\nDB_ROOT_PASSWORD=ci-root-pass\nAISSEASTATS_VERSION=ci\nTZ=UTC\n' > .env
+          files="-f docker-compose.yml"
+          if [ "$VARIANT" = hardened ]; then files="$files -f docker-compose.hardened.yml"; fi
+          echo "COMPOSE_FILES=$files" >> "$GITHUB_ENV"
+          docker compose $files up -d --no-build
+      - name: Stack test
+        run: sh tests/stack.sh
+      - name: Logs
+        if: always()
+        run: docker compose $COMPOSE_FILES ps; docker compose $COMPOSE_FILES logs --tail 200
+

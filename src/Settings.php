@@ -29,6 +29,7 @@ final class Settings
             'public_position_round' => false,
             'map_tiles' => 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             'map_attribution' => '© OpenStreetMap contributors',
+            'public_url' => '',
             'admin_hash' => '',
             'ingest_token_hash' => '',
             'rules' => Rules::defaults(),

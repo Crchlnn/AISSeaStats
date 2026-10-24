@@ -2,6 +2,32 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.2.0-beta.1 — 23/10/2026
+
+Version de test : publiée seulement sous l'étiquette d'image `1.2.0-beta.1` (jamais `latest`). La 1.2.0 définitive suit dans une à deux semaines.
+
+Nouveautés
+- Home Assistant par MQTT (admin → MQTT / Home Assistant) : le worker garde une connexion au serveur MQTT et publie chaque minute, en conservé, l'état de la station sur `aisseastats/<station>/state` (navires du jour, navires actifs, nouveaux navires du jour, messages du jour et de la dernière heure, portée du jour, record de portée, âge du dernier message, réception oui/non). Avec la découverte, un appareil « AISSeaStats » et ses 9 capteurs apparaissent seuls dans Home Assistant. `availability` vaut `online`, et le serveur publie lui-même `offline` si le worker s'arrête (last will). Identifiant et mot de passe, TLS avec ou sans vérification du certificat, bouton de test. Pas de message par navire
+- Alertes navires (admin → Alertes navires et résumés) : liste de surveillance, détresse, militaire, autorités et secours, matières dangereuses, très grand navire, pavillon rare, grande plaisance, première visite, nouveau record de portée, propagation exceptionnelle ; actifs par défaut une fois activées : surveillance, détresse, militaire, record de portée. Une fois par navire, motif et passage ; plusieurs motifs en un seul message avec type, pavillon, distance, direction, destination et lien vers la fiche. Heures calmes (sauf détresse) et maximum par heure ; les 100 derniers messages sont listés avec leur résultat
+- Résumés quotidien et/ou hebdomadaire à l'heure choisie : navires, nouveaux navires, messages, meilleure portée, navires remarquables, heure la plus chargée ; un bouton envoie tout de suite le résumé du jour
+- Canaux par type de message (réception, navires, résumés) parmi ntfy, Telegram, webhook, e-mail et MQTT. Les alertes de réception partent toujours vers tous les canaux configurés, MQTT compris s'il est activé ; « Envoyer un test » des alertes teste aussi MQTT. Les messages webhook et MQTT portent `kind` et, pour un navire, `mmsi`, `triggers`, `distance_nm` et `url`
+- Admin → Station : adresse publique facultative de la page, pour les liens des alertes et résumés et le lien « Visiter » de Home Assistant ; `?mmsi=<numéro>` ouvre la fiche d'un navire sur la page
+- Constellation : destinations déclarées par les navires de la période autour de la station, avec leurs types (bulles en relief), ou réseau des ports reliés par les changements de destination des navires, flèches dans le sens du trajet ; top 10, 20 ou 30 ; clic sur une bulle ou une flèche pour lister ses navires ; même information en liste
+- Records : réception la plus lointaine, plus grand navire, plus rapide, pavillon le plus rare, journée la plus chargée, plus longue présence continue, premier navire reçu
+- Signal et distance : niveau moyen du signal par tranches de 2 NM sur la période, pour toute la station et par direction
+- Règles de l'admin : explication qu'aucune série de MMSI n'est réservée aux navires militaires
+
+Durcissement (seconde revue de sécurité, 22/10/2026)
+- API publique : chaque requête est arrêtée au bout de 20 secondes (`max_statement_time` de MariaDB)
+- La construction de l'image échoue s'il manque une extension PHP nécessaire (mbstring, pdo_mysql, json, zlib, OPcache)
+- README : « Exposer sur Internet » (reverse proxy HTTPS, admin et ingestion gardés sur le réseau local, écoute sur 127.0.0.1 avec `docker-compose.override.yml`, limitation du débit, pare-feu)
+- CI : la vraie pile Docker (base, web, worker) est démarrée et testée de bout en bout (installation avec le code à usage unique, ingestion gzip, connexion admin, worker, données conservées après redémarrage, processus en `www-data`) ; tests MQTT contre Mosquitto
+- `docker-compose.hardened.yml` (facultatif) : conteneur web sans privilèges Linux hormis ceux dont ses serveurs ont besoin, `no-new-privileges` ; en cours de validation par la CI, donc pas utilisé par défaut
+- Avertissement non bloquant pour un mot de passe admin de moins de 8 caractères (à l'installation et au changement)
+- Publication : l'étiquette majeure (`1`) est aussi publiée, `AISSEASTATS_VERSION=1` suit donc toutes les versions 1.x
+
+Base de données : migrations 009 (journal des alertes), 010 (historique des destinations déclarées), 011 (niveau de signal par distance), appliquées automatiquement. L'historique des destinations et les niveaux de signal démarrent avec cette version.
+
 ## 1.1.6 — 21/10/2026
 
 Sécurité (revue de code du 21/10/2026 ; aucun constat critique ni haut)

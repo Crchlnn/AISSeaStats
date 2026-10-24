@@ -48,6 +48,10 @@ final class Ingest
     private array $positions = [];
     /** @var array<string, array{dist:float, mmsi:int}> */
     private array $polar = [];
+    /** @var array<string, array{n: int, sum: float, min: float, max: float}> "day|bin|octant" => signal level by distance (1.2.0) */
+    private array $sigBand = [];
+    /** @var array<int, array{0: int, 1: int, 2: string, 3: string}> [ts, mmsi, old, new] declared destination changes (1.2.0) */
+    private array $destChanges = [];
     /** @var array<string, string> cache of local day per hour */
     private array $dayCache = [];
     /** @var array<int, int>|null MMSIs whose raw messages are captured (debug), null when off */
@@ -208,6 +212,8 @@ final class Ingest
         $this->mType = [];
         $this->positions = [];
         $this->polar = [];
+        $this->sigBand = [];
+        $this->destChanges = [];
     }
 
     /** @param array<string, mixed> $m */
@@ -446,6 +452,18 @@ final class Ingest
             if (!isset($this->polar[$key]) || $dist > $this->polar[$key]['dist']) {
                 $this->polar[$key] = ['dist' => $dist, 'mmsi' => $mmsi, 'ts' => $ts];
             }
+            // Signal level by distance (1.2.0): bins of 2 NM, eight directions of 45°.
+            $sig = isset($m['signalpower']) && is_numeric($m['signalpower']) ? (float) $m['signalpower'] : null;
+            if ($sig !== null && $sig > -200 && $sig < 100) {
+                $bk = $day . '|' . min(150, (int) floor($dist / 2)) . '|' . ((int) floor(fmod($brg + 22.5, 360.0) / 45) % 8); // 0 = N (337.5° to 22.5°), 1 = NE…
+                $sb = &$this->sigBand[$bk];
+                $sb ??= ['n' => 0, 'sum' => 0.0, 'min' => $sig, 'max' => $sig];
+                $sb['n']++;
+                $sb['sum'] += $sig;
+                $sb['min'] = min($sb['min'], $sig);
+                $sb['max'] = max($sb['max'], $sig);
+                unset($sb);
+            }
         }
 
         if ($pid !== null) {
@@ -496,7 +514,14 @@ final class Ingest
             if (self::validImo($imo)) {
                 $set('imo', $imo);
             }
-            $set('destination', self::cleanText($m['destination'] ?? null, 32));
+            $dest = self::cleanText($m['destination'] ?? null, 32);
+            // History of destinations (1.2.0): a real change only, not "FR SML" -> "FRSML".
+            $norm = static fn (?string $d): string => strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) $d));
+            if ($dest !== null && $v['destination'] !== null && $norm($dest) !== '' && $norm((string) $v['destination']) !== ''
+                && $norm($dest) !== $norm((string) $v['destination'])) {
+                $this->destChanges[] = [$ts, (int) $v['mmsi'], (string) $v['destination'], $dest];
+            }
+            $set('destination', $dest);
             if (isset($m['eta']) && is_string($m['eta']) && !str_starts_with($m['eta'], '00-00')) {
                 $set('eta', substr($m['eta'], 0, 16));
             }
@@ -680,6 +705,19 @@ final class Ingest
              max_dist_nm = GREATEST(max_dist_nm, VALUES(max_dist_nm))',
             $rows
         );
+
+        $rows = [];
+        foreach ($this->sigBand as $key => $b) {
+            [$day, $bin, $oct] = explode('|', $key);
+            $rows[] = [$day, (int) $bin, (int) $oct, $b['n'], round($b['sum'], 2), round($b['min'], 1), round($b['max'], 1)];
+        }
+        self::bulk(
+            'INSERT INTO signal_band (day, bin, octant, n, sig_sum, sig_min, sig_max) VALUES %s ON DUPLICATE KEY UPDATE
+             n = n + VALUES(n), sig_sum = sig_sum + VALUES(sig_sum),
+             sig_min = LEAST(sig_min, VALUES(sig_min)), sig_max = GREATEST(sig_max, VALUES(sig_max))',
+            $rows
+        );
+        self::bulk('INSERT INTO destination_change (ts, mmsi, old_dest, new_dest) VALUES %s', $this->destChanges);
     }
 
     /** @param array<int, array<int, mixed>> $rows */

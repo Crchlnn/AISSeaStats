@@ -2,6 +2,32 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.2.0-beta.1 — 2026-10-23
+
+Test version: published only as the image tag `1.2.0-beta.1` (never `latest`). The final 1.2.0 follows in one or two weeks.
+
+New
+- Home Assistant through MQTT (admin → MQTT / Home Assistant): the worker keeps one connection to your MQTT server and publishes every minute, retained, the station state on `aisseastats/<station>/state` (vessels today, active vessels, new vessels today, messages today and in the last hour, today's range, range record, age of the last message, reception on/off). With discovery on, an "AISSeaStats" device and its 9 sensors appear in Home Assistant by themselves. `availability` is `online`, and the server publishes `offline` itself if the worker stops (last will). User and password, TLS with or without checking the certificate, test button. No message per vessel
+- Vessel alerts (admin → Vessel alerts and summaries): watch list, distress, military, authorities and rescue, dangerous goods, very large, rare flag, superyacht, first visit, new range record, exceptional propagation; on by default once enabled: watch list, distress, military, range record. Once per vessel, reason and passage; several reasons in one message with type, flag, distance, direction, destination and a link to the vessel card. Quiet hours (distress excepted) and a maximum per hour; the last 100 messages are listed with their result
+- Daily and/or weekly summaries at the chosen time: vessels, new vessels, messages, best range, interesting vessels, busiest hour; a button sends today's summary at once
+- Channels per kind of message (reception, vessels, summaries) among ntfy, Telegram, webhook, e-mail and MQTT. Reception alerts keep going to every channel set up, MQTT included when it is enabled; the alerts' "Send a test" also tests MQTT. Webhook and MQTT messages carry `kind` and, for vessels, `mmsi`, `triggers`, `distance_nm` and `url`
+- Admin → Station: optional public address of the page, used for the links in alerts and summaries and for Home Assistant's "Visit" link; `?mmsi=<number>` opens a vessel's card on the page
+- Constellation: destinations declared by the vessels of the period around the station, with their vessel types (bubbles with a relief effect), or the network of ports linked by the vessels' destination changes, with arrows in the direction of travel; top 10, 20 or 30; click a bubble or an arrow to list its vessels; the same information as a list
+- Records: furthest reception, largest vessel, fastest, rarest flag, busiest day, longest continuous presence, first vessel received
+- Signal and distance: mean signal level by 2 NM distance bins over the period, for the whole station and by direction
+- Admin rules: explanation that no MMSI block is reserved for military vessels
+
+Hardening (second security review, 2026-10-22)
+- Public API: each query is stopped after 20 seconds (MariaDB `max_statement_time`)
+- Image build fails if a required PHP extension is missing (mbstring, pdo_mysql, json, zlib, OPcache)
+- README: "Exposing to the Internet" (HTTPS reverse proxy, admin and ingestion kept on the home network, listening on 127.0.0.1 with `docker-compose.override.yml`, rate limiting, firewall)
+- CI: the real Docker stack (database, web, worker) is started and tested end to end (setup with the one-time code, gzip ingestion, admin login, worker, data kept after a restart, processes running as `www-data`); MQTT tests against Mosquitto
+- `docker-compose.hardened.yml` (optional): web container without Linux capabilities except those its servers need, `no-new-privileges`; being validated by the CI, so not used by default
+- Non-blocking warning for an admin password under 8 characters (at setup and when changing it)
+- Release workflow: also publishes the major tag (`1`), so `AISSEASTATS_VERSION=1` follows every 1.x release
+
+Database: migrations 009 (alert log), 010 (history of declared destinations), 011 (signal level by distance), applied automatically. The history of destinations and the signal levels start with this version.
+
 ## 1.1.6 — 2026-10-21
 
 Security (code review of 2026-10-21; no critical or high finding)
