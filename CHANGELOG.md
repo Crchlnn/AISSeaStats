@@ -2,6 +2,29 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.2.0 — 2026-10-27
+
+Everything from 1.2.0-beta.1 (MQTT and Home Assistant, vessel alerts and summaries, constellation, records, signal and distance, hardening; see below), plus testers' feedback:
+
+New
+- Interesting vessels: the tags above the list are filters; click "Military" to list only military vessels, click again to see them all. The filter is applied in the database, so a rare tag is not lost beyond the 30 latest passages (issue #4)
+- Constellation: zoom with the + / − / ⟲ buttons, a double click, Ctrl + wheel or a pinch, then drag to move; names are shown in full once zoomed and keep their size on screen. Hovering a destination shows how crews wrote it ("written: NL RTM, ROTTERDAM")
+- Port names (admin → destination dictionary): "Fill in the names of UN/LOCODE ports" downloads UNECE's list from the station on demand (about 17,500 ports) and shows `NLRTM` as *Rotterdam* on the routes card, the constellation, vessel lists and cards. The list is not shipped with AISSeaStats (unclear licence); names typed in the dictionary keep priority
+- Documentation: ports view screenshot; checking MQTT with `mosquitto_sub` and setting up Mosquitto with a user and password
+
+Fixes
+- Admin, dark theme chosen with the page's button: secondary buttons (Sign out, Statistics, Generate a new token…) had black text on a dark background
+- Constellation on a phone: names running past the edge of the drawing are shortened, and drawn above the bubbles
+- Signal and distance: no empty chart area while there is no data yet
+- Top routes: compass sectors written in full ("West → West"); in French the one-letter "O" (Ouest) looked like a zero
+- Admin on a phone: the list of debug log files no longer makes the page wider than the screen
+- Destinations "FOR ORDERS" / "FOR ORDER" (waiting for orders) are no longer taken for a port
+- Records, fastest vessel: up to 50 kn for high-speed craft and 40 kn for other vessels, so a corrupted speed (55 kn for a ferry) is left out
+- Lost password: the login page and README say to run `docker compose exec app …` from the install folder, or `docker exec -it aisseastats-app-1 …` from anywhere (issue #5)
+- CI and release: GitHub actions moved to their Node 24 versions (setup-qemu v4, setup-buildx v4, login v4, metadata v6, build-push v7)
+
+Database: migration 012 (UN/LOCODE port names, empty until the admin downloads the list), applied automatically. From 1.1.6, migrations 009 to 012 are applied.
+
 ## 1.2.0-beta.1 — 2026-10-23
 
 Test version: published only as the image tag `1.2.0-beta.1` (never `latest`). The final 1.2.0 follows in one or two weeks.

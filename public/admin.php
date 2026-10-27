@@ -15,6 +15,7 @@ use AISSeaStats\LoginGuard;
 use AISSeaStats\MqttPublisher;
 use AISSeaStats\Notify;
 use AISSeaStats\Page;
+use AISSeaStats\PortNames;
 use AISSeaStats\Rules;
 use AISSeaStats\Settings;
 use AISSeaStats\Web;
@@ -229,6 +230,21 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $rows = Destinations::parseForm((array) ($_POST['dest_from'] ?? []), (array) ($_POST['dest_to'] ?? []));
                 Settings::set('dest_aliases', $rows);
                 $flash[] = ['ok', I18n::t('admin.dest_saved', ['n' => count($rows)])];
+                break;
+
+            case 'ports_import':
+                @set_time_limit(180);
+                try {
+                    $n = PortNames::import();
+                } catch (RuntimeException $e) {
+                    throw new InvalidArgumentException(I18n::t('admin.ports_failed', ['e' => $e->getMessage()]));
+                }
+                $flash[] = ['ok', I18n::t('admin.ports_done', ['n' => number_format($n, 0, ',', "\u{202F}")])];
+                break;
+
+            case 'ports_clear':
+                PortNames::clear();
+                $flash[] = ['ok', I18n::t('admin.ports_cleared')];
                 break;
 
             case 'photo_upload':
@@ -812,6 +828,16 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
     <p><button class="btn secondary" type="button" id="dest-add"><?= $t('admin.dest_add') ?></button>
       <button class="btn" type="submit"><?= $t('admin.save') ?></button></p>
   </form>
+  <h3 class="sub"><?= $t('admin.ports') ?></h3>
+  <?php $ps = PortNames::status(); ?>
+  <p class="muted small"><?= $t('admin.ports_help') ?> <a href="<?= Web::e(PortNames::INFO) ?>" target="_blank" rel="noopener">unlocode.unece.org</a></p>
+  <p class="small"><?= $ps['count'] > 0 ? $t('admin.ports_state', ['n' => number_format($ps['count'], 0, ',', "\u{202F}"), 'a' => $ago($ps['ts'] ?: null)]) : $t('admin.ports_none') ?></p>
+  <form method="post" class="inline-form"><?= $form('ports_import') ?>
+    <button class="btn secondary" type="submit"><?= $t($ps['count'] > 0 ? 'admin.ports_update' : 'admin.ports_import') ?></button></form>
+  <?php if ($ps['count'] > 0): ?>
+  <form method="post" class="inline-form"><?= $form('ports_clear') ?>
+    <button class="btn secondary" type="submit"><?= $t('admin.ports_clear') ?></button></form>
+  <?php endif; ?>
   <?php if ($destSeen): ?>
     <h3 class="sub"><?= $t('admin.dest_seen') ?></h3>
     <table class="table dest-seen"><tbody>
@@ -820,7 +846,8 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
           $merged = $d['ck'] !== $d['rk']; ?>
         <tr><td><?= Web::e(implode(' · ', $variants)) ?>
             <?php if ($d['ck'] === Destinations::UNKNOWN): ?><span class="type"><?= $t('admin.dest_is_unknown') ?></span>
-            <?php elseif ($merged): ?><span class="type">→ <?= Web::e(Destinations::label((string) $d['ck'], '', $destMap)) ?></span><?php endif; ?></td>
+            <?php elseif ($merged): ?><span class="type">→ <?= Web::e(Destinations::label((string) $d['ck'], '', $destMap)) ?></span>
+            <?php elseif (($pName = PortNames::name((string) $d['ck'])) !== null): ?><span class="type"><?= Web::e($pName) ?></span><?php endif; ?></td>
           <td class="r"><?= $t('routes.vessels_n', ['n' => (int) $d['vessels']]) ?></td>
           <td class="r"><?php if (!$merged && $d['ck'] !== Destinations::UNKNOWN && !isset($destMap[$d['rk']])): ?><button type="button" class="btn secondary dest-use" data-variants="<?= Web::e(implode(', ', $variants)) ?>"><?= $t('admin.dest_use') ?></button><?php endif; ?></td></tr>
       <?php endforeach; ?>
@@ -931,7 +958,7 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
   <?php if ($dLogs === []): ?>
     <p class="muted small"><?= $t('admin.debuglog_none') ?></p>
   <?php else: ?>
-    <table class="table"><tbody>
+    <table class="table debuglog-table"><tbody>
       <?php foreach ($dLogs as $f): ?>
         <tr><td><code><?= Web::e($f['name']) ?></code></td>
           <td class="r"><?= $t('unit.kb', ['n' => number_format(max(1, (int) round($f['size'] / 1024)), 0, ',', "\u{202F}")]) ?></td>

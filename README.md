@@ -9,7 +9,7 @@ AIS-catcher already shows a live map. AISSeaStats keeps the history and turns it
 - **Top routes**, inferred from where each vessel enters and leaves your coverage, drawn on a map along their most typical real track (rivers and fairways included)
 - **Traffic density**: a heatmap of where vessels sail (shipping lanes, fairways, ports), over any period, with the station's range by direction drawn on top
 - **Top vessels** by passages, days seen, length, speed and distance, 10 to 100 per page
-- **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list
+- **Interesting vessels**: military, authorities and rescue, superyachts, dangerous goods, very large ships, rare flags, your own watch list; click a tag to list only those
 - **Fleet** by type and flag, and **range by direction**, with the vessel and time of each record
 - **Regulars**: vessels that come back most regularly, and the time between passages on each vessel card
 - **Busiest hours**: average traffic by weekday and hour
@@ -32,7 +32,10 @@ French and English, light and dark themes, works on a phone. Runs next to AIS-ca
   <img src="docs/screenshots/fleet-range.png" alt="Top vessels, fleet by type and flag, range by direction" width="49%">
 </p>
 
-![Constellation: destinations declared by the vessels around the station, with their vessel types](docs/screenshots/constellation.png)
+<p>
+  <img src="docs/screenshots/constellation.png" alt="Constellation: destinations declared by the vessels around the station, with their vessel types" width="49%">
+  <img src="docs/screenshots/constellation-ports.png" alt="Constellation, ports view: ports linked by the vessels' destination changes, arrows in the direction of travel" width="49%">
+</p>
 
 ![Regulars, busiest hours by weekday and hour, and station reception hour by hour (dark theme)](docs/screenshots/new-stats.png)
 
@@ -210,6 +213,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.2.0 | 2026-10-27 | Release of the 1.2.0 features, with testers' feedback: clickable tags to filter interesting vessels (issue #4), zoom in the constellation, UN/LOCODE port names on demand (NLRTM → Rotterdam), "FOR ORDERS" no longer a destination, plausible speeds only in the records, dark theme buttons readable, `bin/reset-admin.php` and Mosquitto set-up documented (issue #5) |
 | 1.2.0-beta.1 | 2026-10-23 | Test version. Home Assistant sensors through MQTT; vessel alerts (watch list, military, distress, range record…) and daily or weekly summaries on ntfy, Telegram, webhook, e-mail or MQTT, with quiet hours and channels per kind; constellation of destinations and ports network; records; signal and distance; public address for links in alerts; hardening (database time limit on the public API, image checks, end-to-end test of the Docker stack, [Exposing to the Internet](#exposing-to-the-internet)) |
 | 1.1.6 | 2026-10-21 | Security review fixes: login attempts limited, one-time setup code, photo look-ups only for received vessels, refused ingest posts no longer logged, strict `INGEST_ALLOW`, worker without root, option to round the published position, admin session timeout |
 | 1.1.5 | 2026-10-15 | Top routes drawn along their most typical real track instead of a straight line (rivers, fairways), with arrows of the same size at every zoom; no minimum length for the admin password |
@@ -228,6 +232,8 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 | 1.0.0-beta.1 | 2026-09-29 | First test version |
 
 ## Everyday commands
+
+Run the `docker compose` commands from the folder you installed from (the one with `docker-compose.yml`); elsewhere they answer "no configuration file provided". From any folder, use the container name instead: `docker exec -it aisseastats-app-1 php bin/reset-admin.php` (the name starts with the install folder's name, see `docker ps`).
 
 | Task | Command |
 | --- | --- |
@@ -251,8 +257,8 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 - **Exceptional propagation.** A day is flagged (orange triangle above the bar) when its range is at least twice the usual range (median of the 30 previous days), at least 20 NM more, and at least 3 vessels were heard beyond 1.5 × the usual range. Beyond the horizon, VHF reception depends on tropospheric ducting, which follows the weather: see the forecast on [dxinfocentre.com](https://dxinfocentre.com/tropo_eur.html).
 - **Regulars.** Time between passages is measured from the end of one passage to the start of the next (a passage ends after 2 hours without hearing the vessel). Vessels with at least 4 passages in the period are ranked by how steady that time is. A vessel moored at the edge of coverage, heard on and off, can count several short passages.
 - **Busiest hours.** Average number of vessels per hour, by weekday and hour in the station's time zone, over the period (at least 7 days). Hours without any message are left out, so an outage does not look like calm.
-- **Constellation.** *Destinations*: the station in the centre, the destinations declared by the vessels seen in the period around it (bubble size = number of vessels, spellings grouped with the destination dictionary; unknown and meaningless destinations left out), and their vessel types as small bubbles. *Ports*: when a vessel changes its declared destination, its old port is linked to the new one; arrows follow the direction of travel and their width is the number of vessels. This history is recorded since 1.2.0, so the view fills over a few weeks. Click a bubble or an arrow to list its vessels; "Show as a list" gives the same information as text.
-- **Records.** All-time records of the station, with the vessel and the date: furthest reception (same rule as the range chart), largest vessel, fastest (class A and B, up to 60 kn so that bad positions and aircraft are left out), rarest flag, busiest day (vessels), longest continuous presence (one passage), first vessel received.
+- **Constellation.** *Destinations*: the station in the centre, the destinations declared by the vessels seen in the period around it (bubble size = number of vessels, spellings grouped with the destination dictionary; unknown and meaningless destinations left out), and their vessel types as small bubbles. *Ports*: when a vessel changes its declared destination, its old port is linked to the new one; arrows follow the direction of travel and their width is the number of vessels. This history is recorded since 1.2.0, so the view fills over a few weeks. Click a bubble or an arrow to list its vessels; hovering a destination also shows how crews wrote it ("written: NL RTM, ROTTERDAM"), and the dictionary of destinations gives it a name. Zoom with the + and − buttons, a double click, Ctrl + wheel or a pinch, then drag to move; names are then shown in full. "Show as a list" gives the same information as text.
+- **Records.** All-time records of the station, with the vessel and the date: furthest reception (same rule as the range chart), largest vessel, fastest (class A and B, up to 50 kn for high-speed craft and 40 kn for other vessels, so that corrupted speeds and aircraft are left out), rarest flag, busiest day (vessels), longest continuous presence (one passage), first vessel received.
 - **Signal and distance.** Mean signal level of the positions received, by 2 NM distance bins, over the period; pick a direction to compare it with the whole station. A healthy station shows a steady decrease with distance; a direction that drops early points to an obstacle or the antenna's pattern. The level comes from the `signalpower` field of the messages AIS-catcher sends; recorded since 1.2.0.
 - **Station reception.** One cell per hour: green when messages were received, red when none were. At a station that always hears a shore base station, red means an outage; in a quiet area it can also mean no traffic. To be warned of outages, see [Alerts](#alerts).
 
@@ -262,11 +268,13 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 **Military vessels.** No MMSI block is reserved for warships: each country assigns their numbers (usually in its normal range), and many do not transmit, or transmit with AIS type 35. The rule tags type 35 and the MMSI prefixes you list in the admin (known prefixes of your area).
 
-**Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`SW → NE`). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
+**Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`South-West → North-East`; `West → West` for vessels that came and left on the same side, often moored or at anchor). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
 
-**Destination dictionary.** Crews type the destination freely: `FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`… Group the spellings of a port under one name (for example `SAINT-MALO, ST-MALO, FR SML` → `FRSML`). The admin lists the destinations received in the last 90 days to help. Meaningless values such as `0` or `Q` are shown as *Unknown*.
+**Destination dictionary.** Crews type the destination freely: `FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`… Group the spellings of a port under one name (for example `SAINT-MALO, ST-MALO, FR SML` → `FRSML`). The admin lists the destinations received in the last 90 days to help. Meaningless values such as `0`, `Q` or `FOR ORDERS` (waiting for orders, since 1.2.0) are shown as *Unknown*.
 
 <img src="docs/screenshots/admin-destinations.png" alt="Destination dictionary in the admin page" width="70%">
+
+**Port names (UN/LOCODE, 1.2.0).** Many crews type the port's UN/LOCODE code (`NLRTM`, `FRSML`, `IEORK`). In the dictionary card, "Fill in the names of UN/LOCODE ports" downloads UNECE's list from your station (about 7 MB, the [datasets/un-locode](https://github.com/datasets/un-locode) extract; about 17,500 ports kept) and shows `NLRTM` as *Rotterdam* everywhere: routes card, constellation, vessel lists and cards. The list is not shipped with AISSeaStats because its licence does not clearly allow redistribution; it is only downloaded when you ask. Names typed in the dictionary keep priority; "Update the list" and "Remove the list" do what they say.
 
 **Maximum plausible range** (1,500 NM by default): tropospheric ducting can bring messages from over 1,000 NM. Beyond 50 NM, a position only counts for range records when the same vessel was received shortly before at a consistent position, so a single corrupted message cannot set a record.
 
@@ -309,6 +317,27 @@ With discovery on (default), an **AISSeaStats** device appears in Home Assistant
 | `homeassistant/…/aisseastats_<id>/…/config` | discovery, retained, refreshed hourly |
 
 No message is published per vessel. `<station>` is the station name in lower case (letters, digits and dashes); the prefixes can be changed. Example automation: trigger on `mqtt` topic `aisseastats/+/event`, condition `{{ trigger.payload_json.kind == 'vessel' }}`, then a notification with `{{ trigger.payload_json.title }}`.
+
+**Check what is published.** With the Mosquitto tools (`mosquitto-clients` package, or inside a Mosquitto container), with the user and password of your broker:
+
+```sh
+mosquitto_sub -h <broker> -u <user> -P '<password>' -t 'aisseastats/#' -v
+docker exec mosquitto mosquitto_sub -h localhost -u <user> -P '<password>' -t 'aisseastats/#' -v   # Mosquitto in Docker
+```
+
+The state arrives at once (retained), then every minute; "Send a test" in the admin shows up on `…/event`. The topic uses the station name in lower case (`SM35` → `aisseastats/sm35/…`).
+
+**No MQTT server yet?** Home Assistant users: install the *Mosquitto broker* add-on and create a Home Assistant user for AISSeaStats. Otherwise, Mosquitto in Docker, with a user and password (Mosquitto 2 refuses anonymous clients from other machines):
+
+```sh
+mkdir -p ~/mosquitto/config
+printf 'listener 1883\nallow_anonymous false\npassword_file /mosquitto/config/passwd\n' > ~/mosquitto/config/mosquitto.conf
+docker run --rm -it -v ~/mosquitto/config:/mosquitto/config eclipse-mosquitto:2 \
+  sh -c 'mosquitto_passwd -c /mosquitto/config/passwd aisseastats && chown mosquitto:mosquitto /mosquitto/config/passwd && chmod 0700 /mosquitto/config/passwd'
+docker run -d --name mosquitto --restart unless-stopped -p 1883:1883 -v ~/mosquitto/config:/mosquitto/config eclipse-mosquitto:2
+```
+
+The second command asks for the password of the `aisseastats` user: choose a real one, not the station name. Then enter the Pi's address, port 1883, `aisseastats` and that password in the admin.
 
 ## Photos
 

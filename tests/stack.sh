@@ -55,7 +55,7 @@ res=$(printf '{"msgs":[{"mmsi":244030470,"type":1,"lat":51.95,"lon":4.2,"speed":
   curl -s -u "aisseastats:${ingest}" -H "Content-Encoding: gzip" --data-binary @- "$BASE/ingest.php")
 echo "$res" | grep -q '"ok":true' || fail "ingestion rejected: $res"
 curl -s "$BASE/api.php?q=summary" | grep -q '"active_now":1' || fail "vessel not counted"
-for q in records signal constellation "constellation&mode=ports"; do
+for q in records signal constellation "constellation&mode=ports" "remarkable&tag=military"; do
   curl -fs "$BASE/api.php?q=$q" > /dev/null || fail "API $q"
 done
 ok "ingestion and API"

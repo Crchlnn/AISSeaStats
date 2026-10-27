@@ -135,7 +135,8 @@
   function zoneLabel(z) {
     if (z == null) { return '?'; }
     if (z === 'STATION') { return t('zone.station'); }
-    var key = 'dir.' + z;
+    // Compass sectors in full in routes ("Ouest → Ouest", 1.2.0): the one-letter "O" of French looked like a zero.
+    var key = 'dirfull.' + z;
     return cfg.i18n[key] ? t(key) : z;
   }
   function vlink(v) {
@@ -570,13 +571,22 @@
   }
 
   // ---------- Remarkable ----------
+  // The tags above the list are filters (1.2.0, issue #4): one click shows only that kind of vessel, a second
+  // click shows them all again. The counts stay those of all interesting vessels.
   function renderRemarkable(data) {
     var c = data.counts || {};
+    var on = data.tag || '';
     var keys = Object.keys(c).sort(function (a, b) { return c[b] - c[a]; });
-    $('remarkable-counts').innerHTML = keys.map(function (k) { return tagChip(k, c[k]); }).join('');
+    $('remarkable-counts').innerHTML = keys.map(function (k) {
+      var d = TAG_ICONS[k] || TAG_ICONS.watchlist;
+      var pressed = k === on;
+      return '<button type="button" class="chip chip-filter' + (pressed ? ' on' : '') + (on && !pressed ? ' off' : '') + '" data-tag="' + esc(k) + '" aria-pressed="' + pressed + '"' +
+        ' title="' + esc(pressed ? t('remarkable.filter_all') : t('remarkable.filter_only')) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="' + d + '"/></svg>' +
+        esc(t('tag.' + k)) + ' <span class="n">' + num(c[k]) + '</span></button>';
+    }).join('');
     var list = $('remarkable-list');
     if (!data.rows.length) {
-      list.innerHTML = '<li class="empty">' + esc(t('remarkable.empty')) + '</li>';
+      list.innerHTML = '<li class="empty">' + esc(t(on ? 'remarkable.empty_tag' : 'remarkable.empty')) + '</li>';
       return;
     }
     list.innerHTML = data.rows.map(function (v) {
@@ -931,7 +941,7 @@
         [t('vessel.flag'), v.country ? flag(v.country) + ' ' + v.country : null],
         [t('vessel.size'), v.length_m ? v.length_m + ' × ' + (v.beam_m || '?') + ' m' : null],
         [t('vessel.draught'), v.draught_m ? nf1.format(v.draught_m) + ' m' : null],
-        [t('vessel.destination'), v.destination],
+        [t('vessel.destination'), v.destination ? v.destination + (v.destination_name ? ' (' + v.destination_name + ')' : '') : v.destination],
         [t('vessel.first_seen'), fmtDate.format(new Date(v.first_seen * 1000))],
         [t('vessel.last_seen'), fmtDateTime.format(new Date(v.last_seen * 1000)) + ' (' + ago(v.last_seen) + ')'],
         [t('vessel.passages'), num(v.passages) + ' · ' + t('top.days_n', { n: num(v.days_seen) })],
@@ -1220,10 +1230,10 @@
     var note = $('signal-note');
     if (!d.bins.length) {
       note.textContent = t('sig.none');
-      $('chart-signal').hidden = true;
+      $('chart-signal').parentNode.hidden = true; // no empty chart area
       return;
     }
-    $('chart-signal').hidden = false;
+    $('chart-signal').parentNode.hidden = false;
     var sec = $('signal-sector').value;
     var sets = [{
       label: t('sig.all_dirs'), data: d.bins.map(function (b) { return { x: b.d, y: b.avg, n: b.n }; }),
@@ -1457,7 +1467,8 @@
         g.setAttribute('data-type', n.d.cat);
         g.setAttribute('data-title', n.parent.label + ' · ' + t('type.' + n.d.cat));
       } else {
-        title = n.d.label + ' : ' + t('rec.vessels', { n: num(n.d.n) }) + (total ? ' (' + Math.round(n.d.n * 100 / total) + NB + '%)' : '');
+        title = n.d.label + ' : ' + t('rec.vessels', { n: num(n.d.n) }) + (total ? ' (' + Math.round(n.d.n * 100 / total) + NB + '%)' : '') +
+          (n.d.written && n.d.written.length ? ' · ' + t('const.written', { w: n.d.written.join(', ') }) : '');
         g.setAttribute('data-list', 'dest');
         g.setAttribute('data-value', n.d.key);
         g.setAttribute('data-title', n.d.label);
@@ -1484,13 +1495,37 @@
           y: (right === null ? n.y + n.r + 14 : n.y + 4).toFixed(1),
           'text-anchor': right === null ? 'middle' : (right ? 'start' : 'end'), class: 'const-label' + (right === null ? ' station' : '')
         });
-        txt.textContent = n.label.length > 18 ? n.label.slice(0, 17) + '…' : n.label;
+        // Fit the label in the drawing (about 6.7 px per character at 12 px): long names near the edges of a phone
+        // screen were cut off.
+        var lx = Number(txt.getAttribute('x'));
+        var room = right === null ? W : (right ? W - lx : lx) - 4;
+        var maxCh = Math.max(4, Math.min(small ? 14 : 18, Math.floor(room / 6.7)));
+        txt.textContent = n.label.length > maxCh ? n.label.slice(0, maxCh - 1) + '…' : n.label;
+        txt.setAttribute('data-full', n.label);
         g.appendChild(txt);
       }
       gn.appendChild(g);
     });
     svg.appendChild(gn);
+    // Labels above every bubble (with their halo), so a small type bubble never hides a name.
+    var glab = svgEl('g', { class: 'const-labels', 'aria-hidden': 'true' });
+    Array.prototype.forEach.call(gn.querySelectorAll('text.const-label'), function (el) { glab.appendChild(el); });
+    svg.appendChild(glab);
     box.appendChild(svg);
+    // Second pass with the real text widths: shorten any label still running past the edge of the drawing.
+    Array.prototype.forEach.call(svg.querySelectorAll('text.const-label'), function (el) {
+      var full = el.textContent, len = full.length;
+      var fits = function () {
+        var bb = el.getBBox();
+        return bb.x >= 0 && bb.x + bb.width <= W;
+      };
+      while (len > 3 && !fits()) {
+        len--;
+        el.textContent = full.slice(0, len).replace(/[…\s]+$/, '') + '…';
+      }
+      el.setAttribute('data-short', el.textContent);
+    });
+    constZoom(box, svg, W, H);
 
     // Legend of the vessel types shown, and the accessible list.
     if (!ports) {
@@ -1501,7 +1536,7 @@
       }).join('');
       list.innerHTML = nodes.map(function (n) {
         return '<li class="clickable" tabindex="0" role="button" data-list="dest" data-value="' + esc(n.key) + '" data-title="' + esc(n.label) + '">' +
-          '<span class="route-name">' + esc(n.label) + '</span><span class="val">' + esc(t('rec.vessels', { n: num(n.n) })) + ' · ' +
+          '<span class="route-name">' + esc(n.label) + (n.written && n.written.length ? ' <span class="muted small">(' + esc(n.written.join(', ')) + ')</span>' : '') + '</span><span class="val">' + esc(t('rec.vessels', { n: num(n.n) })) + ' · ' +
           esc(n.types.slice(0, 4).map(function (ty) { return t('type.' + ty.cat) + ' ' + num(ty.n); }).join(', ')) + '</span></li>';
       }).join('');
       var parts = [t('const.note_dest', { n: num(total) })];
@@ -1533,10 +1568,114 @@
   constSeg('const-mode', 'data-mode', function (v) { constState.mode = v === 'ports' ? 'ports' : 'dest'; });
   constSeg('const-top', 'data-top', function (v) { constState.top = Number(v) || 20; });
   $('signal-sector').addEventListener('change', function () { if (last.signal) { renderSignal(last.signal); } });
-  var constW = 0;
+  // Zoom (1.2.0, tester's request): buttons, double click / double tap, Ctrl + wheel or trackpad pinch, two-finger pinch
+  // on a phone; drag to move once zoomed. The page still scrolls normally over the drawing when it is not zoomed.
+  function constZoom(box, svg, W, H) {
+    var v = { k: 1, x: 0, y: 0 }, MAXK = 6;
+    var labels = svg.querySelectorAll('text.const-label');
+    var bar = document.createElement('div');
+    bar.className = 'const-zoom';
+    bar.innerHTML = '<button type="button" data-z="in" aria-label="' + esc(t('const.zoom_in')) + '" title="' + esc(t('const.zoom_in')) + '">+</button>' +
+      '<button type="button" data-z="out" aria-label="' + esc(t('const.zoom_out')) + '" title="' + esc(t('const.zoom_out')) + '">−</button>' +
+      '<button type="button" data-z="reset" aria-label="' + esc(t('const.zoom_reset')) + '" title="' + esc(t('const.zoom_reset')) + '">⟲</button>';
+    box.appendChild(bar);
+    function apply() {
+      v.k = Math.min(MAXK, Math.max(1, v.k));
+      var w = W / v.k, h = H / v.k;
+      v.x = Math.min(W - w, Math.max(0, v.x));
+      v.y = Math.min(H - h, Math.max(0, v.y));
+      svg.setAttribute('viewBox', v.x.toFixed(1) + ' ' + v.y.toFixed(1) + ' ' + w.toFixed(1) + ' ' + h.toFixed(1));
+      var zoomed = v.k > 1.01;
+      svg.classList.toggle('zoomed', zoomed);
+      // Zoomed in, names are shown in full: there is room, and one can move to read them.
+      // Names keep the same size on screen at every zoom (CSSOM styles, allowed by the page's CSP).
+      Array.prototype.forEach.call(labels, function (l) {
+        l.textContent = (zoomed ? l.getAttribute('data-full') : l.getAttribute('data-short')) || l.textContent;
+        l.style.fontSize = zoomed ? (12 / v.k).toFixed(2) + 'px' : '';
+        l.style.strokeWidth = zoomed ? (3 / v.k).toFixed(2) + 'px' : '';
+      });
+      bar.querySelector('[data-z="out"]').disabled = !zoomed;
+      bar.querySelector('[data-z="reset"]').disabled = !zoomed;
+      bar.querySelector('[data-z="in"]').disabled = v.k >= MAXK - 0.01;
+    }
+    function toUser(cx, cy) {
+      var r = svg.getBoundingClientRect();
+      return { x: v.x + (cx - r.left) / r.width * (W / v.k), y: v.y + (cy - r.top) / r.height * (H / v.k) };
+    }
+    function zoomAt(f, p) {
+      var nk = Math.min(MAXK, Math.max(1, v.k * f));
+      v.x = p.x - (p.x - v.x) * v.k / nk;
+      v.y = p.y - (p.y - v.y) * v.k / nk;
+      v.k = nk;
+      apply();
+    }
+    bar.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) { return; }
+      var c = { x: v.x + W / v.k / 2, y: v.y + H / v.k / 2 };
+      var z = b.getAttribute('data-z');
+      if (z === 'in') { zoomAt(1.6, c); } else if (z === 'out') { zoomAt(1 / 1.6, c); } else { v = { k: 1, x: 0, y: 0 }; apply(); }
+    });
+    svg.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey && !e.metaKey) { return; } // a plain wheel scrolls the page
+      e.preventDefault();
+      zoomAt(Math.exp(-e.deltaY * 0.01), toUser(e.clientX, e.clientY));
+    }, { passive: false });
+    svg.addEventListener('dblclick', function (e) {
+      if (e.target.closest('[data-list]')) { return; }
+      e.preventDefault();
+      zoomAt(e.shiftKey ? 1 / 2 : 2, toUser(e.clientX, e.clientY));
+    });
+    var ptrs = {}, start = null, moved = false;
+    svg.addEventListener('pointerdown', function (e) {
+      ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = Object.keys(ptrs);
+      moved = false;
+      if (ids.length === 2) {
+        var a = ptrs[ids[0]], b = ptrs[ids[1]];
+        start = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, k: v.k };
+      } else {
+        start = { x: e.clientX, y: e.clientY, vx: v.x, vy: v.y };
+      }
+    });
+    svg.addEventListener('pointermove', function (e) {
+      if (!ptrs[e.pointerId] || !start) { return; }
+      ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = Object.keys(ptrs), r = svg.getBoundingClientRect();
+      if (ids.length === 2 && start.d) {
+        var a = ptrs[ids[0]], b = ptrs[ids[1]];
+        zoomAt((Math.hypot(a.x - b.x, a.y - b.y) || 1) / start.d * start.k / v.k, toUser((a.x + b.x) / 2, (a.y + b.y) / 2));
+        moved = true;
+      } else if (ids.length === 1 && v.k > 1.01 && start.vx != null) {
+        var dx = e.clientX - start.x, dy = e.clientY - start.y;
+        if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; }
+        v.x = start.vx - dx / r.width * (W / v.k);
+        v.y = start.vy - dy / r.height * (H / v.k);
+        apply();
+      }
+    });
+    function up(e) {
+      delete ptrs[e.pointerId];
+      start = null; // after a pinch, the finger left does not pan from a stale point
+    }
+    svg.addEventListener('pointerup', up);
+    svg.addEventListener('pointercancel', up);
+    svg.addEventListener('pointerleave', up);
+    // A drag or a pinch is not a click on the bubble under the finger.
+    svg.addEventListener('click', function (e) {
+      if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; }
+    }, true);
+    apply();
+  }
+  // Redraw on a change of width only: on a phone, the address bar showing or hiding changes the height and must
+  // not reset the zoom.
+  var constW = 0, constLastW = 0;
   window.addEventListener('resize', function () {
     clearTimeout(constW);
-    constW = setTimeout(function () { if (constState.data) { renderConstellation(constState.data); } }, 200);
+    constW = setTimeout(function () {
+      var w = $('constellation').clientWidth;
+      if (constState.data && w !== constLastW) { constLastW = w; renderConstellation(constState.data); }
+    }, 200);
   });
 
   // ---------- Loading ----------
@@ -1559,7 +1698,20 @@
     return api('regulars', { days: range().days, limit: state.regLimit, page: state.regPage })
       .then(current(state.range, function (d) { renderRegulars(d); })).catch(fail('regulars'));
   }
-  function loadRemarkable() { return api('remarkable').then(function (d) { last.remarkable = d; renderRemarkable(d); }).catch(fail('remarkable')); }
+  function loadRemarkable() {
+    var tag = state.remTag || '';
+    return api('remarkable', tag ? { tag: tag } : {}).then(function (d) {
+      if ((state.remTag || '') !== tag) { return; } // another filter was chosen meanwhile
+      last.remarkable = d; renderRemarkable(d);
+    }).catch(fail('remarkable'));
+  }
+  $('remarkable-counts').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-tag]');
+    if (!b) { return; }
+    state.remTag = state.remTag === b.getAttribute('data-tag') ? '' : b.getAttribute('data-tag');
+    $('remarkable-list').classList.add('is-loading');
+    loadRemarkable().then(function () { $('remarkable-list').classList.remove('is-loading'); });
+  });
   function loadPeriodWidgets() {
     var k = state.range;
     var days = range().days;

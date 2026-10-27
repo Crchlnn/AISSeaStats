@@ -1,6 +1,6 @@
 # AISSeaStats — guide rapide
 
-Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic. Depuis la 1.1.0 : navires vus par tranche de distance, jours de propagation exceptionnelle et navires les plus lointains, habitués (temps entre deux passages), heures d'affluence et réception de la station heure par heure. En 1.1.1 : tranche de distance de chaque navire dans la liste d'une barre, navire, date et heure de chaque record de portée. En 1.1.3 : carte de densité du trafic (heatmap des trajets), avec la portée par direction depuis la 1.1.4. En 1.1.5 : routes tracées le long de leur trajet réel le plus typique. En 1.2.0 (bêta) : capteurs Home Assistant par MQTT, alertes navires et résumés quotidiens ou hebdomadaires, constellation des destinations et réseau des ports, records, signal et distance.
+Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvde-github/AIS-catcher), façon SkyStats : navires vus par heure, jour et mois, top routes sur une carte, top navires, navires remarquables (militaires, secours, grande plaisance, matières dangereuses, très grands navires, pavillons rares, liste de surveillance), flotte par type et pavillon, portée par direction, et une fiche navire avec photo au clic. Depuis la 1.1.0 : navires vus par tranche de distance, jours de propagation exceptionnelle et navires les plus lointains, habitués (temps entre deux passages), heures d'affluence et réception de la station heure par heure. En 1.1.1 : tranche de distance de chaque navire dans la liste d'une barre, navire, date et heure de chaque record de portée. En 1.1.3 : carte de densité du trafic (heatmap des trajets), avec la portée par direction depuis la 1.1.4. En 1.1.5 : routes tracées le long de leur trajet réel le plus typique. En 1.2.0 : capteurs Home Assistant par MQTT, alertes navires et résumés quotidiens ou hebdomadaires, constellation des destinations et réseau des ports (avec zoom), noms des ports UN/LOCODE, records, signal et distance, étiquettes cliquables pour filtrer les navires remarquables.
 
 ![Page de statistiques : chiffres clés, navires vus par heure, top routes et destinations déclarées](screenshots/overview.png)
 
@@ -9,7 +9,10 @@ Statistiques longue durée pour une station [AIS-catcher](https://github.com/jvd
   <img src="screenshots/fleet-range.png" alt="Top navires, flotte par type et pavillon, portée par direction" width="49%">
 </p>
 
-![Constellation : destinations déclarées par les navires autour de la station, avec leurs types](screenshots/constellation.png)
+<p>
+  <img src="screenshots/constellation.png" alt="Constellation : destinations déclarées par les navires autour de la station, avec leurs types" width="49%">
+  <img src="screenshots/constellation-ports.png" alt="Constellation, vue Ports : ports reliés par les changements de destination des navires, flèches dans le sens du trajet" width="49%">
+</p>
 
 ![Habitués, heures d'affluence par jour et heure, réception de la station heure par heure (thème sombre, interface anglaise)](screenshots/new-stats.png)
 
@@ -149,6 +152,7 @@ La plus récente en premier. Détail, corrections et évolutions de la base pour
 
 | Version | Date | Nouveautés |
 |---|---|---|
+| 1.2.0 | 27/10/2026 | Publication des nouveautés 1.2.0, avec les retours des testeurs : étiquettes cliquables pour filtrer les navires remarquables (ticket #4), zoom dans la constellation, noms des ports UN/LOCODE à la demande (NLRTM → Rotterdam), « FOR ORDERS » n'est plus une destination, vitesses plausibles seulement dans les records, boutons lisibles en thème sombre, `bin/reset-admin.php` et installation de Mosquitto documentés (ticket #5) |
 | 1.2.0-beta.1 | 23/10/2026 | Version de test. Capteurs Home Assistant par MQTT ; alertes navires (liste de surveillance, militaire, détresse, record de portée…) et résumés quotidiens ou hebdomadaires sur ntfy, Telegram, webhook, e-mail ou MQTT, avec heures calmes et canaux par type ; constellation des destinations et réseau des ports ; records ; signal et distance ; adresse publique pour les liens des alertes ; durcissement (temps limite des requêtes de l'API publique, vérifications de l'image, test de bout en bout de la pile Docker, [Exposer sur Internet](#exposer-sur-internet)) |
 | 1.1.6 | 21/10/2026 | Corrections de la revue de sécurité : tentatives de connexion limitées, code d'installation à usage unique, photos cherchées seulement pour les navires reçus, envois refusés non journalisés, `INGEST_ALLOW` strict, worker sans root, option d'arrondi de la position publiée, expiration des sessions admin |
 | 1.1.5 | 15/10/2026 | Top routes tracées le long de leur trajet réel le plus typique au lieu d'une ligne droite (fleuves, chenaux), flèches de même taille à tous les zooms ; plus de longueur minimale pour le mot de passe d'administration |
@@ -175,6 +179,8 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 
 ## Commandes utiles
 
+Lancez les commandes `docker compose` depuis le dossier d'installation (celui qui contient `docker-compose.yml`) ; ailleurs, elles répondent « no configuration file provided ». Depuis n'importe quel dossier, utilisez le nom du conteneur : `docker exec -it aisseastats-app-1 php bin/reset-admin.php` (le nom commence par celui du dossier d'installation, voir `docker ps`).
+
 | Action | Commande |
 | --- | --- |
 | Mettre à jour (image toute prête) | `git pull && docker compose pull && docker compose up -d` |
@@ -189,8 +195,8 @@ docker compose exec app php bin/reset-data.php --yes    # pour repartir de zéro
 
 ## Nouveautés 1.2.0
 
-- **Constellation** : vue *Destinations* — la station au centre, autour les destinations déclarées par les navires de la période (taille = nombre de navires, variantes regroupées par le dictionnaire, destinations inconnues ou sans signification écartées) et, en petites bulles, leurs types de navires. Vue *Ports* — quand un navire change de destination, l'ancien port est relié au nouveau ; les flèches suivent le sens du trajet, leur épaisseur est le nombre de navires. Cet historique est enregistré depuis la 1.2.0 : la vue se remplit en quelques semaines. Un clic sur une bulle ou une flèche liste les navires ; « Voir en liste » donne la même information en texte.
-- **Records** : réception la plus lointaine, plus grand navire, plus rapide (classes A et B, jusqu'à 60 nœuds pour écarter positions aberrantes et aéronefs), pavillon le plus rare, journée la plus chargée, plus longue présence continue, premier navire reçu, avec le navire et la date.
+- **Constellation** : vue *Destinations* — la station au centre, autour les destinations déclarées par les navires de la période (taille = nombre de navires, variantes regroupées par le dictionnaire, destinations inconnues ou sans signification écartées) et, en petites bulles, leurs types de navires. Vue *Ports* — quand un navire change de destination, l'ancien port est relié au nouveau ; les flèches suivent le sens du trajet, leur épaisseur est le nombre de navires. Cet historique est enregistré depuis la 1.2.0 : la vue se remplit en quelques semaines. Un clic sur une bulle ou une flèche liste les navires ; le survol d'une destination montre aussi comment les équipages l'ont écrite (« écrit : NL RTM, ROTTERDAM »), et le dictionnaire des destinations lui donne un nom. Zoom avec les boutons + et −, un double-clic, Ctrl + molette ou en pinçant, puis glisser pour se déplacer ; les noms sont alors affichés en entier. « Voir en liste » donne la même information en texte.
+- **Records** : réception la plus lointaine, plus grand navire, plus rapide (classes A et B, jusqu'à 50 nœuds pour les navires à grande vitesse et 40 pour les autres, pour écarter vitesses aberrantes et aéronefs), pavillon le plus rare, journée la plus chargée, plus longue présence continue, premier navire reçu, avec le navire et la date.
 - **Signal et distance** : niveau moyen du signal des positions reçues, par tranches de 2 NM, sur la période ; choisissez une direction pour la comparer à toute la station. Une station saine montre une baisse régulière avec la distance ; une direction qui chute tôt signale un obstacle ou le diagramme de l'antenne. Le niveau vient du champ `signalpower` des messages d'AIS-catcher ; enregistré depuis la 1.2.0.
 - **Alertes navires et résumés** (admin) : mêmes canaux que les alertes de réception, plus MQTT. Motifs activables un par un : liste de surveillance, détresse, militaire, autorités et secours, matières dangereuses, très grand navire, pavillon rare, grande plaisance, première visite, nouveau record de portée, propagation exceptionnelle (actifs par défaut une fois les alertes navires activées : surveillance, détresse, militaire, record de portée). Un navire n'alerte qu'une fois par passage et par motif ; plusieurs motifs font un seul message, avec type, pavillon, distance, direction, destination et, si l'adresse publique de la page est renseignée, un lien qui ouvre sa fiche. **Heures calmes** (la détresse passe quand même) et **maximum par heure** : les alertes retenues sont notées au journal, pas envoyées plus tard. **Résumés** quotidien (20 h par défaut) et/ou hebdomadaire (dimanche 20 h). **Canaux par type de message** : par exemple réception par e-mail, navires sur ntfy et MQTT, résumés sur Telegram. Les 100 derniers messages sont listés avec leur résultat.
 - **Navires militaires** : aucune série de MMSI n'est réservée aux navires de guerre. Chaque pays attribue les siens (le plus souvent dans sa plage normale), et beaucoup n'émettent pas, ou avec le type AIS 35. La règle repère le type 35 et les préfixes MMSI que vous indiquez dans l'admin.
@@ -209,6 +215,27 @@ Avec la découverte activée (par défaut), un appareil **AISSeaStats** apparaî
 | `homeassistant/…/aisseastats_<id>/…/config` | découverte, conservée, rafraîchie toutes les heures |
 
 Aucun message n'est publié par navire. `<station>` est le nom de la station en minuscules (lettres, chiffres et tirets) ; les préfixes sont modifiables. Exemple d'automatisation : déclencheur `mqtt` sur `aisseastats/+/event`, condition `{{ trigger.payload_json.kind == 'vessel' }}`, puis une notification avec `{{ trigger.payload_json.title }}`.
+
+**Vérifier ce qui est publié.** Avec les outils Mosquitto (paquet `mosquitto-clients`, ou dans un conteneur Mosquitto), avec l'identifiant et le mot de passe de votre serveur :
+
+```sh
+mosquitto_sub -h <serveur> -u <identifiant> -P '<mot de passe>' -t 'aisseastats/#' -v
+docker exec mosquitto mosquitto_sub -h localhost -u <identifiant> -P '<mot de passe>' -t 'aisseastats/#' -v   # Mosquitto sous Docker
+```
+
+L'état arrive tout de suite (conservé), puis chaque minute ; « Envoyer un test » dans l'admin apparaît sur `…/event`. Le sujet reprend le nom de la station en minuscules (`SM35` → `aisseastats/sm35/…`).
+
+**Pas encore de serveur MQTT ?** Avec Home Assistant : installez le module *Mosquitto broker* et créez un utilisateur Home Assistant pour AISSeaStats. Sinon, Mosquitto sous Docker, avec identifiant et mot de passe (Mosquitto 2 refuse les clients anonymes venant d'autres machines) :
+
+```sh
+mkdir -p ~/mosquitto/config
+printf 'listener 1883\nallow_anonymous false\npassword_file /mosquitto/config/passwd\n' > ~/mosquitto/config/mosquitto.conf
+docker run --rm -it -v ~/mosquitto/config:/mosquitto/config eclipse-mosquitto:2 \
+  sh -c 'mosquitto_passwd -c /mosquitto/config/passwd aisseastats && chown mosquitto:mosquitto /mosquitto/config/passwd && chmod 0700 /mosquitto/config/passwd'
+docker run -d --name mosquitto --restart unless-stopped -p 1883:1883 -v ~/mosquitto/config:/mosquitto/config eclipse-mosquitto:2
+```
+
+La deuxième commande demande le mot de passe de l'utilisateur `aisseastats` : choisissez-en un vrai, pas le nom de la station. Indiquez ensuite dans l'admin l'adresse du Pi, le port 1883, `aisseastats` et ce mot de passe.
 
 ## Exposer sur Internet
 
@@ -246,8 +273,9 @@ Derrière un proxy, l'adresse vue par `INGEST_ALLOW` et par la limite de connexi
 - **Sécurité (1.1.6)** : 10 mauvais mots de passe depuis une adresse (ou 100 au total) en 15 minutes bloquent la connexion admin pendant 15 minutes (`bin/reset-admin.php` lève le blocage) ; une session admin expire après 8 h d'inactivité ; la page publique ne pose aucun cookie aux visiteurs. Admin → Station permet d'arrondir à environ 1 km la position publiée sur la page et l'API, utile si l'antenne est à domicile et la page publique. Une entrée invalide dans `INGEST_ALLOW` est ignorée (et signalée dans les journaux) au lieu d'ouvrir l'ingestion à tous. Le conteneur worker tourne en `www-data`, sans privilège.
 - **Sécurité (1.2.0)** : chaque requête de l'API publique est arrêtée au bout de 20 secondes, pour que personne ne puisse occuper la base ; la construction de l'image échoue s'il manque une extension PHP ; un avertissement (non bloquant) s'affiche pour un mot de passe admin de moins de 8 caractères ; MQTT vérifie le certificat TLS du serveur sauf si vous le désactivez ; mots de passe et jetons ne sont jamais réaffichés dans l'admin. `docker-compose.hardened.yml` (facultatif) retire aussi au conteneur web les privilèges dont ses serveurs n'ont pas besoin.
 
-- **Zones nommées** (page admin) : par défaut une route va d'un secteur à un autre (`SO → NE`). Ajoutez une écluse, un port ou une ville pour lire `Port → Écluse nord`.
-- **Dictionnaire des destinations** (page admin) : les équipages saisissent la destination librement (`FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`…). Regroupez les variantes d'un port sous un seul nom, par exemple `SAINT-MALO, ST-MALO, FR SML` → `FRSML`. Les valeurs sans signification (`0`, `Q`…) s'affichent « Inconnue ».
+- **Zones nommées** (page admin) : par défaut une route va d'un secteur à un autre (`Sud-Ouest → Nord-Est` ; `Ouest → Ouest` pour les navires arrivés et repartis du même côté, souvent à quai ou au mouillage). Ajoutez une écluse, un port ou une ville pour lire `Port → Écluse nord`.
+- **Noms des ports (UN/LOCODE, 1.2.0)** : beaucoup d'équipages tapent le code UN/LOCODE du port (`NLRTM`, `FRSML`, `IEORK`). Dans la carte du dictionnaire, « Compléter avec les noms UN/LOCODE » télécharge depuis votre station la liste de l'UNECE (environ 7 Mo, extrait [datasets/un-locode](https://github.com/datasets/un-locode) ; environ 17 500 ports gardés) et affiche `NLRTM` comme *Rotterdam* partout : carte des routes, constellation, listes et fiches des navires. La liste n'est pas livrée avec AISSeaStats, car sa licence ne permet pas clairement de la redistribuer : elle n'est téléchargée qu'à votre demande. Les noms saisis dans le dictionnaire restent prioritaires ; « Mettre à jour la liste » et « Retirer la liste » font ce qu'ils disent.
+- **Dictionnaire des destinations** (page admin) : les équipages saisissent la destination librement (`FRSML`, `FR SML`, `SAINT-MALO`, `ST-MALO`…). Regroupez les variantes d'un port sous un seul nom, par exemple `SAINT-MALO, ST-MALO, FR SML` → `FRSML`. Les valeurs sans signification (`0`, `Q`…, et depuis la 1.2.0 `FOR ORDERS`, « en attente d'ordres ») s'affichent « Inconnue ».
 - **Portée maximale plausible** (1 500 NM par défaut) : la propagation troposphérique peut amener des messages de plus de 1 000 NM. Au-delà de 50 NM, une position ne compte pour les records de portée que si le navire a été reçu peu avant à une position cohérente.
 - **Graphique des navires** : cliquez sur une barre pour voir la liste des navires de cette heure, ce jour ou ce mois.
 - **Photos** : dans l'ordre, votre propre photo (admin → Photos de navires, ou lien « Ajouter une photo » sur la fiche quand vous êtes connecté), puis une photo libre de Wikimedia Commons ou Wikidata (par IMO ou MMSI). Beaucoup de bateaux de pêche et de plaisance n'ont aucune photo libre : ajoutez la vôtre. VesselFinder, ShipSpotting et aiscatcher.org sont proposés en liens : leurs conditions n'autorisent pas la récupération automatique de leurs photos.

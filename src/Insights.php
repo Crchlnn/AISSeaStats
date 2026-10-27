@@ -10,8 +10,10 @@ namespace AISSeaStats;
 final class Insights
 {
     private const INFRA = "('BASE','ATON')";
-    /** Plausible speed of a vessel; faster values come from bad positions or aircraft. */
-    private const MAX_SPEED_KN = 60;
+    /** Plausible top speeds: high-speed craft (AIS types 40-49) up to 50 kn, other vessels up to 40 kn. Faster values
+     *  come from corrupted speed reports (a 55 kn "ferry" was seen at a test station). */
+    private const MAX_SPEED_KN = 40;
+    private const MAX_SPEED_HSC_KN = 50;
     /** Signal bins of 2 NM need this many messages to be shown (noise of single messages). */
     private const SIGNAL_MIN_N = 5;
     public const CONSTELLATION_TOPS = [10, 20, 30];
@@ -58,8 +60,9 @@ final class Insights
             'largest' => $vessel(Db::one("SELECT mmsi, name, country, shiptype, vclass, length_m, beam_m, last_seen AS ts FROM vessel
                 WHERE vclass NOT IN {$infra} AND length_m IS NOT NULL AND length_m BETWEEN 1 AND 460 ORDER BY length_m DESC, first_seen LIMIT 1")),
             'fastest' => $vessel(Db::one("SELECT mmsi, name, country, shiptype, vclass, max_speed_kn AS speed, last_seen AS ts FROM vessel
-                WHERE vclass IN ('A', 'B') AND max_speed_kn IS NOT NULL AND max_speed_kn <= ? ORDER BY max_speed_kn DESC, first_seen LIMIT 1",
-                [self::MAX_SPEED_KN])),
+                WHERE vclass IN ('A', 'B') AND max_speed_kn IS NOT NULL
+                AND max_speed_kn <= IF(shiptype BETWEEN 40 AND 49, ?, ?) ORDER BY max_speed_kn DESC, first_seen LIMIT 1",
+                [self::MAX_SPEED_HSC_KN, self::MAX_SPEED_KN])),
             'rarest_flag' => $vessel($rare),
             'busiest_day' => $busy !== null ? ['day' => (string) $busy['day'], 'n' => (int) $busy['n'], 'msgs' => (int) $busy['msgs']] : null,
             'longest_stay' => $vessel($long),
@@ -112,7 +115,8 @@ final class Insights
         $map = Destinations::map();
         [$dkey, $dparams] = Destinations::sql($map);
         $infra = self::INFRA;
-        $rows = Db::all("SELECT {$dkey} AS dkey, MAX(UPPER(TRIM(destination))) AS label, shiptype, vclass, COUNT(*) AS n FROM vessel
+        $rows = Db::all("SELECT {$dkey} AS dkey, MAX(UPPER(TRIM(destination))) AS label,
+            SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT UPPER(TRIM(destination)) SEPARATOR '|'), '|', 6) AS variants, shiptype, vclass, COUNT(*) AS n FROM vessel
             WHERE last_seen >= ? AND destination IS NOT NULL AND destination <> '' AND vclass NOT IN {$infra}
             GROUP BY dkey, shiptype, vclass", array_merge($dparams, [$sinceTs]));
         $dest = [];
@@ -126,8 +130,14 @@ final class Insights
                 $hidden += $n;
                 continue;
             }
-            $dest[$k] ??= ['key' => $k, 'label' => Destinations::label($k, (string) $r['label'], $map), 'n' => 0, 'types' => []];
+            $dest[$k] ??= ['key' => $k, 'label' => Destinations::label($k, (string) $r['label'], $map), 'n' => 0, 'types' => [], 'written' => []];
             $dest[$k]['n'] += $n;
+            // How the crews wrote it ("ROTTERDAM", "NL RTM"…): shown on hover, often says what a code such as NLRTM is.
+            foreach (explode('|', (string) $r['variants']) as $w) {
+                if ($w !== '' && $w !== $dest[$k]['label'] && count($dest[$k]['written']) < 4) {
+                    $dest[$k]['written'][$w] = true;
+                }
+            }
             $cat = Notify::typeCat((int) ($r['shiptype'] ?? 0), (string) $r['vclass']);
             $dest[$k]['types'][$cat] = ($dest[$k]['types'][$cat] ?? 0) + $n;
         }
@@ -135,6 +145,7 @@ final class Insights
         $shown = array_slice(array_values($dest), 0, $top);
         foreach ($shown as &$d) {
             arsort($d['types']);
+            $d['written'] = array_keys($d['written']);
             $d['types'] = array_map(static fn (string $c, int $n): array => ['cat' => $c, 'n' => $n], array_keys($d['types']), $d['types']);
         }
         unset($d);

@@ -23,7 +23,8 @@ You should get an answer within a week.
   and logged). Behind a reverse proxy, the address seen is the proxy's.
 - Outbound network calls, all optional: vessel photo look-ups (Wikimedia Commons, Wikidata, at most 30 a minute,
   only for vessels the station received) and the alert channels configured by the admin (ntfy, Telegram,
-  webhook, SMTP e-mail, heartbeat URL) and MQTT (TLS certificate checked unless the admin turns it off).
+  webhook, SMTP e-mail, heartbeat URL), the UN/LOCODE port list downloaded when the admin asks for it
+  (raw.githubusercontent.com, 30 MB at most, only port codes and names are kept) and MQTT (TLS certificate checked unless the admin turns it off).
   Alert messages carry public AIS data and the station name, never the station position. Map tiles are loaded by the visitor's browser, not by the server.
 - The public page and API show the station position; the admin can round it to about 1 km.
 - Containers: the web server and PHP workers run as `www-data`; the background worker runs as `www-data`

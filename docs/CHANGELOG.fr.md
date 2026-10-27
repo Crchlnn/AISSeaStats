@@ -2,6 +2,29 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.2.0 — 27/10/2026
+
+Tout le contenu de la 1.2.0-beta.1 (MQTT et Home Assistant, alertes navires et résumés, constellation, records, signal et distance, durcissement ; voir plus bas), plus les retours des testeurs :
+
+Nouveautés
+- Navires remarquables : les étiquettes au-dessus de la liste sont des filtres ; un clic sur « Militaire » ne liste que les navires militaires, un second clic les montre tous. Le filtre est appliqué dans la base, pour qu'une étiquette rare ne se perde pas au-delà des 30 derniers passages (ticket #4)
+- Constellation : zoom avec les boutons + / − / ⟲, un double-clic, Ctrl + molette ou en pinçant, puis glisser pour se déplacer ; une fois zoomé, les noms sont affichés en entier et gardent leur taille à l'écran. Le survol d'une destination montre comment les équipages l'ont écrite (« écrit : NL RTM, ROTTERDAM »)
+- Noms des ports (admin → dictionnaire des destinations) : « Compléter avec les noms UN/LOCODE » télécharge à la demande, depuis la station, la liste de l'UNECE (environ 17 500 ports) et affiche `NLRTM` comme *Rotterdam* dans la carte des routes, la constellation, les listes et fiches des navires. La liste n'est pas livrée avec AISSeaStats (licence floue) ; les noms saisis dans le dictionnaire restent prioritaires
+- Documentation : capture de la vue Ports ; vérification de MQTT avec `mosquitto_sub` et installation de Mosquitto avec identifiant et mot de passe
+
+Corrections
+- Admin, thème sombre choisi avec le bouton de la page : les boutons secondaires (Déconnexion, Statistiques, nouveau jeton…) avaient un texte noir sur fond sombre
+- Constellation sur téléphone : les noms qui dépassaient du dessin sont raccourcis et dessinés au-dessus des bulles
+- Signal et distance : plus de grande zone vide tant qu'il n'y a pas de données
+- Top routes : secteurs écrits en entier (« Ouest → Ouest ») ; le « O » d'Ouest ressemblait à un zéro
+- Admin sur téléphone : la liste des fichiers de débogage n'élargit plus la page au-delà de l'écran
+- Les destinations « FOR ORDERS » / « FOR ORDER » (en attente d'ordres) ne sont plus prises pour un port
+- Records, plus rapide : jusqu'à 50 nœuds pour les navires à grande vitesse et 40 pour les autres, pour écarter une vitesse aberrante (55 nœuds pour un ferry)
+- Mot de passe perdu : la page de connexion et le README indiquent de lancer `docker compose exec app …` depuis le dossier d'installation, ou `docker exec -it aisseastats-app-1 …` depuis n'importe où (ticket #5)
+- CI et publication : actions GitHub passées à leurs versions Node 24 (setup-qemu v4, setup-buildx v4, login v4, metadata v6, build-push v7)
+
+Base de données : migration 012 (noms des ports UN/LOCODE, vide tant que l'admin n'a pas téléchargé la liste), appliquée automatiquement. Depuis la 1.1.6, les migrations 009 à 012 sont appliquées.
+
 ## 1.2.0-beta.1 — 23/10/2026
 
 Version de test : publiée seulement sous l'étiquette d'image `1.2.0-beta.1` (jamais `latest`). La 1.2.0 définitive suit dans une à deux semaines.

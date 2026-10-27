@@ -15,8 +15,8 @@ final class Destinations
     /** SQL key of vessel.destination: upper case, letters and digits only. */
     public const RAW_KEY = "REGEXP_REPLACE(UPPER(TRIM(destination)), '[^A-Z0-9]', '')";
     /** Keys treated as "not declared": 0 to 2 characters, only zeros, or a placeholder word. */
-    private const JUNK_SQL = "'^(.{0,2}|0+|X+|NONE|UNKNOWN|NA|NIL|NULL|NOTAVAILABLE|TBA|TBN)$'";
-    private const JUNK_PHP = '/^(.{0,2}|0+|X+|NONE|UNKNOWN|NA|NIL|NULL|NOTAVAILABLE|TBA|TBN)$/';
+    private const JUNK_SQL = "'^(.{0,2}|0+|X+|NONE|UNKNOWN|NA|NIL|NULL|NOTAVAILABLE|TBA|TBN|FORORDER|FORORDERS)$'";
+    private const JUNK_PHP = '/^(.{0,2}|0+|X+|NONE|UNKNOWN|NA|NIL|NULL|NOTAVAILABLE|TBA|TBN|FORORDER|FORORDERS)$/';
     public const MAX_ROWS = 100;
     public const MAX_ALIASES = 50;
 
@@ -97,17 +97,23 @@ final class Destinations
         return [$sql . ' ELSE ' . self::RAW_KEY . ' END', $params];
     }
 
-    /** Label shown for a canonical key: dictionary label, UN/LOCODE as is, else the most common raw text. */
+    /**
+     * Label shown for a canonical key: dictionary label, UN/LOCODE (with its port name once the admin has
+     * downloaded the list, 1.2.0), else the most common raw text.
+     */
     public static function label(string $key, string $raw, ?array $map = null): string
     {
         if ($key === self::UNKNOWN) {
             return I18n::t('dest.unknown');
         }
         $map ??= self::map();
-        if (isset($map[$key])) {
-            return $map[$key][1];
+        $label = isset($map[$key]) ? $map[$key][1] : (preg_match('/^[A-Z]{2}[A-Z0-9]{3}$/', $key) ? $key : $raw);
+        // A code kept as is ("NLRTM", or the dictionary's "FRSML") shows the port's name; a name typed in the
+        // dictionary wins.
+        if ($label === $key) {
+            return PortNames::name($key) ?? $label;
         }
-        return preg_match('/^[A-Z]{2}[A-Z0-9]{3}$/', $key) ? $key : $raw;
+        return $label;
     }
 
     /**

@@ -111,6 +111,7 @@ $dict = Destinations::parseForm(['SAINT-MALO, ST-MALO; FR SML, 0', '', 'x'], ['f
 check('dest form parsed', $dict === [['to' => 'FRSML', 'from' => ['SAINT-MALO', 'ST-MALO', 'FR SML']]]);
 $map = Destinations::map($dict);
 check('dest canonical via alias', Destinations::canonical('Saint Malo', $map) === 'FRSML' && Destinations::canonical('st-malo', $map) === 'FRSML');
+check('dest "for orders" is not a port', Destinations::canonical('FOR ORDERS', $map) === '?' && Destinations::canonical('for order', $map) === '?');
 check('dest canonical untouched', Destinations::canonical('FRCER', $map) === 'FRCER' && Destinations::canonical('0', $map) === '?');
 [$dsql, $dparams] = Destinations::sql($map);
 check('dest sql parameters', substr_count($dsql, '?') - 1 === count($dparams) && end($dparams) === 'FRSML');
@@ -553,7 +554,7 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     // Records, signal by distance, constellation (1.2.0).
     $rec = AISSeaStats\Insights::records(Settings::timezone());
     check('records', is_array($rec['furthest']) && $rec['furthest']['dist'] > 0 && is_array($rec['first']) && $rec['since'] > 0
-        && array_key_exists('busiest_day', $rec) && ($rec['fastest'] === null || $rec['fastest']['speed'] <= 60));
+        && array_key_exists('busiest_day', $rec) && ($rec['fastest'] === null || $rec['fastest']['speed'] <= 50));
     Db::pdo()->exec('TRUNCATE TABLE signal_band');
     Db::run("INSERT INTO signal_band (day, bin, octant, n, sig_sum, sig_min, sig_max) VALUES
         ('2030-01-01', 0, 0, 10, -100, -15, -5), ('2030-01-01', 0, 2, 10, -200, -25, -15), ('2030-01-01', 5, 0, 2, -60, -31, -29)");
@@ -574,6 +575,39 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     $dst = AISSeaStats\Insights::destinations(0, 10);
     check('destinations constellation', $dst['mode'] === 'dest' && $dst['nodes'] !== [] && isset($dst['nodes'][0]['types'][0]['cat'])
         && !in_array('?', array_column($dst['nodes'], 'key'), true) && AISSeaStats\Insights::destinations(0, 7)['top'] === 20);
+
+    // UN/LOCODE port names, downloaded on demand (1.2.0).
+    $csv = "Change,Country,Location,Name,NameWoDiacritics,Subdivision,Status,Function,Date,IATA,Coordinates,Remarks\n"
+        . ",NL,RTM,Rotterdam,Rotterdam,ZH,AI,12345---,0307,,5155N 00430E,\n"
+        . ",FR,SML,Saint-Malo,Saint-Malo,35,AI,1-3-----,0601,,4839N 00201W,\n"
+        . ",FR,PAR,Paris,Paris,75,AI,--34----,0307,,,\n"
+        . ",XX,<b>,\"Bad, \"\"code\"\"\",x,,,1-------,,,,\n";
+    $pn = AISSeaStats\PortNames::parse($csv);
+    check('port names parsed (ports only)', $pn === ['NLRTM' => 'Rotterdam', 'FRSML' => 'Saint-Malo']);
+    $bad = false;
+    try { AISSeaStats\PortNames::parse("a,b\n1,2\n"); } catch (RuntimeException $e) { $bad = str_contains($e->getMessage(), 'format'); }
+    check('port names: unexpected file refused', $bad);
+    $big = $csv;
+    for ($i = 0; $i < 1200; $i++) {
+        $big .= ',ZZ,' . sprintf('%03d', $i % 1000) . ($i >= 1000 ? 'X' : '') . ',Port ' . $i . ',,,,1-------,,,,' . "\n";
+    }
+    AISSeaStats\PortNames::$fetch = static fn (string $url): string => $big;
+    $nPorts = AISSeaStats\PortNames::import();
+    check('port names imported', $nPorts > 1000 && AISSeaStats\PortNames::status()['count'] === $nPorts && AISSeaStats\PortNames::name('NLRTM') === 'Rotterdam');
+    $keepDict = Settings::get('dest_aliases');
+    Settings::set('dest_aliases', [['to' => 'ST MALO PORT', 'from' => ['FRSML']], ['to' => 'NLRTM', 'from' => ['ROTTERDAM']]]);
+    $pmap = Destinations::map();
+    check('port names in labels, dictionary first', Destinations::label('NLRTM', 'NL RTM', $pmap) === 'Rotterdam'
+        && Destinations::label('STMALOPORT', 'x', $pmap) === 'ST MALO PORT' && Destinations::label('ZZ999', 'zz', $pmap) === 'Port 999'
+        && Destinations::label('ABCDE', 'abc de', $pmap) === 'ABCDE');
+    Settings::set('dest_aliases', $keepDict);
+    AISSeaStats\PortNames::$fetch = static fn (string $url): string => $csv;
+    $kept = false;
+    try { AISSeaStats\PortNames::import(); } catch (RuntimeException $e) { $kept = AISSeaStats\PortNames::status()['count'] === $nPorts; }
+    check('port names: a short file keeps the list', $kept);
+    AISSeaStats\PortNames::clear();
+    AISSeaStats\PortNames::$fetch = null;
+    check('port names cleared', AISSeaStats\PortNames::status()['count'] === 0);
 
     // Vessel alerts and summaries (1.2.0).
     $sent = [];

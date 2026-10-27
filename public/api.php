@@ -67,7 +67,7 @@ try {
         case 'top':
             Web::json(top((string) ($_GET['by'] ?? 'passages'), $sinceDay, $sinceTs, (int) ($_GET['limit'] ?? 10), (int) ($_GET['page'] ?? 0)), 200, 60);
         case 'remarkable':
-            Web::json(remarkable(), 200, 30);
+            Web::json(remarkable((string) ($_GET['tag'] ?? '')), 200, 30);
         case 'fleet':
             Web::json(fleet($sinceDay, $sinceTs), 200, 60);
         case 'density':
@@ -275,18 +275,20 @@ function top(string $by, DateTimeImmutable $sinceDay, int $sinceTs, int $limit =
 }
 
 /** @return array<string, mixed> */
-function remarkable(): array
+function remarkable(string $tag = ''): array
 {
+    // 1.2.0 (issue #4): one tag only, filtered in the database so that rare tags are not lost beyond the 30 latest.
+    $tag = in_array($tag, AISSeaStats\Rules::TAGS, true) ? $tag : '';
     $rows = Db::all('SELECT p.start_ts, p.end_ts, p.max_dist_nm, v.mmsi, v.name, v.shiptype, v.country, v.length_m, v.tags, v.vclass
         FROM passage p JOIN vessel v ON v.mmsi = p.mmsi
-        WHERE v.tags <> \'\' ORDER BY p.start_ts DESC LIMIT 30');
+        WHERE v.tags <> \'\'' . ($tag !== '' ? ' AND FIND_IN_SET(?, v.tags) > 0' : '') . ' ORDER BY p.start_ts DESC LIMIT 30', $tag !== '' ? [$tag] : []);
     $counts = [];
     foreach (Db::all("SELECT tags FROM vessel WHERE tags <> ''") as $r) {
         foreach (explode(',', (string) $r['tags']) as $t) {
             $counts[$t] = ($counts[$t] ?? 0) + 1;
         }
     }
-    return ['rows' => $rows, 'counts' => $counts];
+    return ['rows' => $rows, 'counts' => $counts, 'tag' => $tag];
 }
 
 /** @return array<string, mixed> */
@@ -362,6 +364,12 @@ function vessel(int $mmsi): array
         last_pos_ts, last_sog, last_cog, tags FROM vessel WHERE mmsi = ?', [$mmsi]);
     if ($v === null) {
         Web::json(['error' => 'not found'], 404);
+    }
+    // 1.2.0: the destination's name (dictionary or UN/LOCODE port) when it says more than the text sent.
+    $v['destination_name'] = null;
+    if (!empty($v['destination'])) {
+        $dn = Destinations::label(Destinations::canonical((string) $v['destination']), (string) $v['destination']);
+        $v['destination_name'] = $dn !== $v['destination'] && Destinations::key((string) $v['destination']) !== Destinations::UNKNOWN ? $dn : null;
     }
     $v['days_seen'] = (int) Db::value('SELECT COUNT(*) FROM vessel_daily WHERE mmsi = ?', [$mmsi]);
     $v['gaps'] = Stats::vesselGaps($mmsi);
