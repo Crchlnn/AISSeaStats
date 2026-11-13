@@ -15,8 +15,9 @@ final class MqttPublisher
 {
     /** Discovery is published again every hour (Home Assistant restarted without a retained copy, broker reset…). */
     private const DISCOVERY_EVERY_S = 3600;
-    /** A sensor becomes "unavailable" in Home Assistant when its state is older than this. */
-    private const EXPIRE_AFTER_S = 600;
+    /** A sensor becomes "unavailable" in Home Assistant when its state is older than this (admin setting since 1.2.1:
+     *  3 minutes by default, three missed publications, so that one long worker job does not make the sensors blink). */
+    public const EXPIRE_DEFAULT_S = 180;
 
     /** The worker's publisher, used to send events on its open connection. */
     public static ?self $current = null;
@@ -32,7 +33,7 @@ final class MqttPublisher
     public static function defaults(): array
     {
         return ['enabled' => false, 'host' => '', 'port' => 1883, 'tls' => false, 'tls_verify' => true, 'user' => '', 'pass' => '',
-            'prefix' => 'aisseastats', 'discovery' => true, 'discovery_prefix' => 'homeassistant'];
+            'prefix' => 'aisseastats', 'discovery' => true, 'discovery_prefix' => 'homeassistant', 'expire_after' => self::EXPIRE_DEFAULT_S];
     }
 
     /** @return array<string, mixed> */
@@ -134,6 +135,17 @@ final class MqttPublisher
         }
     }
 
+    /**
+     * Worker stopping (docker stop, restart, update; 1.2.1): "offline" at once and a clean disconnect, instead of
+     * waiting for the broker to notice the lost connection and publish the last will.
+     */
+    public function shutdown(): void
+    {
+        if ($this->mqtt !== null) {
+            $this->goOffline();
+        }
+    }
+
     /** Settings changed or MQTT turned off: say "offline" ourselves, then disconnect cleanly. */
     private function goOffline(): void
     {
@@ -228,7 +240,8 @@ final class MqttPublisher
             'msgs_today' => ['sensor', 'mdi:message-processing', null, ['state_class' => 'total_increasing']],
             'msgs_hour' => ['sensor', 'mdi:message-fast', null, ['state_class' => 'measurement']],
             'range_today' => ['sensor', 'mdi:signal-distance-variant', 'NM', ['state_class' => 'measurement']],
-            'range_record' => ['sensor', 'mdi:trophy', 'NM', []],
+            // state_class (1.2.1): Home Assistant keeps long-term statistics, beyond its 10 days of history.
+            'range_record' => ['sensor', 'mdi:trophy', 'NM', ['state_class' => 'measurement']],
             'last_message_age' => ['sensor', 'mdi:timer-sand', 's', ['device_class' => 'duration', 'state_class' => 'measurement']],
             'reception' => ['binary_sensor', null, null, ['device_class' => 'connectivity', 'payload_on' => 'ON', 'payload_off' => 'OFF']],
         ];
@@ -240,7 +253,7 @@ final class MqttPublisher
                 'state_topic' => $base . '/state',
                 'value_template' => '{{ value_json.' . $key . ' }}',
                 'availability_topic' => $base . '/availability',
-                'expire_after' => self::EXPIRE_AFTER_S,
+                'expire_after' => max(60, min(3600, (int) ($c['expire_after'] ?? self::EXPIRE_DEFAULT_S))),
                 'device' => $device,
             ] + $extra;
             if ($icon !== null) {
@@ -275,6 +288,7 @@ final class MqttPublisher
         $c['prefix'] = $str('mqtt_prefix', 60) !== '' ? $str('mqtt_prefix', 60) : 'aisseastats';
         $c['discovery'] = isset($p['mqtt_discovery']);
         $c['discovery_prefix'] = $str('mqtt_discovery_prefix', 60) !== '' ? $str('mqtt_discovery_prefix', 60) : 'homeassistant';
+        $c['expire_after'] = (int) ($p['mqtt_expire'] ?? 0) > 0 ? max(60, min(3600, (int) $p['mqtt_expire'])) : self::EXPIRE_DEFAULT_S;
         if ($c['host'] !== '' && !Mqtt::validHost($c['host'])) {
             throw new \InvalidArgumentException('mqtt_host');
         }

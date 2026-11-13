@@ -57,8 +57,11 @@ final class Insights
                          ORDER BY secs DESC, p.start_ts LIMIT 1");
         return [
             'furthest' => $vessel($far),
+            // Towboats and pushers declare the length of their convoy (1.2.1): left out, like for the "very large" tag.
             'largest' => $vessel(Db::one("SELECT mmsi, name, country, shiptype, vclass, length_m, beam_m, last_seen AS ts FROM vessel
-                WHERE vclass NOT IN {$infra} AND length_m IS NOT NULL AND length_m BETWEEN 1 AND 460 ORDER BY length_m DESC, first_seen LIMIT 1")),
+                WHERE vclass NOT IN {$infra} AND length_m IS NOT NULL AND length_m BETWEEN 1 AND 460"
+                . (empty(Settings::get('rules')['large_tows']) ? ' AND pusher = 0 AND (shiptype IS NULL OR shiptype NOT IN (31, 32, 52))' : '')
+                . ' ORDER BY length_m DESC, first_seen LIMIT 1')),
             'fastest' => $vessel(Db::one("SELECT mmsi, name, country, shiptype, vclass, max_speed_kn AS speed, last_seen AS ts FROM vessel
                 WHERE vclass IN ('A', 'B') AND max_speed_kn IS NOT NULL
                 AND max_speed_kn <= IF(shiptype BETWEEN 40 AND 49, ?, ?) ORDER BY max_speed_kn DESC, first_seen LIMIT 1",
@@ -215,5 +218,66 @@ final class Insights
         $ids = array_slice(array_keys($mmsi), 0, 300);
         return Db::all('SELECT mmsi, name, shiptype, vclass, country, length_m, tags, last_seen, destination FROM vessel
                         WHERE mmsi IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY last_seen DESC', $ids);
+    }
+
+    /** Kinds of transmitters, in display order: vclass => key (1.2.1). */
+    public const TX_KINDS = ['A' => 'class_a', 'B' => 'class_b', 'SAR' => 'sar', 'EMRG' => 'emergency', 'BASE' => 'base', 'ATON' => 'aton', '' => 'unknown'];
+    /** Aids to navigation grouped by AIS message 21 "type of aid" (ITU-R M.1371). */
+    public const AID_GROUPS = [
+        'light' => [5, 6, 7, 8], 'cardinal' => [9, 10, 11, 12, 20, 21, 22, 23], 'lateral' => [13, 14, 15, 16, 24, 25, 26, 27],
+        'danger' => [17, 28], 'safe_water' => [18, 29], 'special' => [19, 30], 'structure' => [1, 2, 3], 'light_vessel' => [31],
+    ];
+
+    public static function aidGroup(?int $aidType): string
+    {
+        foreach (self::AID_GROUPS as $g => $types) {
+            if ($aidType !== null && in_array($aidType, $types, true)) {
+                return $g;
+            }
+        }
+        return 'unspecified';
+    }
+
+    /**
+     * Every transmitter heard, by kind (admin, 1.2.1): explains the difference between the "known vessels" of the admin
+     * and the vessels of the public page, which leave out base stations and aids to navigation.
+     * @return array{kinds: array<string, array{n: int, rows: array<int, array<string, mixed>>}>, aids: array<string, int>, vessels: int, infra: int}
+     */
+    public static function transmitters(int $limit = 100): array
+    {
+        $kinds = [];
+        foreach (self::TX_KINDS as $vc => $key) {
+            $kinds[$key] = ['n' => 0, 'rows' => []];
+        }
+        foreach (Db::all('SELECT vclass, COUNT(*) AS n FROM vessel GROUP BY vclass') as $r) {
+            $key = self::TX_KINDS[(string) $r['vclass']] ?? 'unknown';
+            $kinds[$key]['n'] += (int) $r['n'];
+        }
+        $hasStation = Settings::hasStation();
+        $sLat = (float) Settings::get('station_lat');
+        $sLon = (float) Settings::get('station_lon');
+        foreach (self::TX_KINDS as $vc => $key) {
+            if ($kinds[$key]['n'] === 0) {
+                continue;
+            }
+            $where = $key === 'unknown' ? "vclass NOT IN ('A', 'B', 'SAR', 'EMRG', 'BASE', 'ATON')" : 'vclass = ?';
+            $rows = Db::all("SELECT mmsi, name, country, shiptype, aid_type, last_seen, last_lat, last_lon FROM vessel WHERE {$where}
+                             ORDER BY last_seen DESC LIMIT " . max(1, min(500, $limit)), $key === 'unknown' ? [] : [$vc]);
+            foreach ($rows as &$r) {
+                $r['dist'] = $hasStation && $r['last_lat'] !== null
+                    ? round(Geo::distanceNm($sLat, $sLon, (float) $r['last_lat'], (float) $r['last_lon']), 1) : null;
+                $r['aid'] = $key === 'aton' ? self::aidGroup($r['aid_type'] !== null ? (int) $r['aid_type'] : null) : null;
+                unset($r['last_lat'], $r['last_lon']);
+            }
+            unset($r);
+            $kinds[$key]['rows'] = $rows;
+        }
+        $aids = array_fill_keys(array_merge(array_keys(self::AID_GROUPS), ['unspecified']), 0);
+        foreach (Db::all("SELECT aid_type, COUNT(*) AS n FROM vessel WHERE vclass = 'ATON' GROUP BY aid_type") as $r) {
+            $aids[self::aidGroup($r['aid_type'] !== null ? (int) $r['aid_type'] : null)] += (int) $r['n'];
+        }
+        $infra = $kinds['base']['n'] + $kinds['aton']['n'];
+        $all = array_sum(array_column($kinds, 'n'));
+        return ['kinds' => $kinds, 'aids' => array_filter($aids), 'vessels' => $all - $infra, 'infra' => $infra];
     }
 }

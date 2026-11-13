@@ -2,6 +2,22 @@
 
 French version: [docs/CHANGELOG.fr.md](docs/CHANGELOG.fr.md).
 
+## 1.2.1 — 2026-11-13
+
+Improvements from users' feedback (Discord, GitHub, Home Assistant users).
+
+Fixes
+- "Very large" tag: towboats and pushers declare the length of their whole convoy (a 15 m boat pushing barges sends 250 m, example ANGIE GOLDING, MMSI 366994190). They are no longer tagged "very large", nor taken for the largest vessel in the records: AIS types 31, 32 and 52, inland push-tow and pusher ERI codes, and vessels seen with navigational status 11 or 12 (towing astern, pushing ahead). Option in the rules to count them anyway. Tags are recomputed when the worker starts
+- Admin, known vessels: same figure as "all time" on the page (base stations and aids to navigation were counted in the admin only, hence 3,713 against 3,596 at one station)
+
+New
+- Admin: click "Known vessels" to see every transmitter by kind (class A, class B, SAR aircraft, distress beacons, base stations, aids to navigation, class not known yet), the page total and the full total, aids to navigation by type (lights, cardinal, lateral, isolated danger, safe water, special marks…) and the list of each kind with distance and last message
+- Home Assistant: the worker publishes "offline" and disconnects when it is stopped (docker stop, restart, update) instead of waiting for the broker's last will; the image now includes the PHP extension pcntl for this (checked at build)
+- Home Assistant: "Unavailable after" setting (60 to 3,600 s, 3 minutes by default instead of 10); the range record gets `state_class: measurement` (long-term statistics). Thanks to the Home Assistant users who tested both
+- Documentation: Home Assistant dashboard example by @Phil353556; what stopping the `app` or `worker` container does in Home Assistant
+
+Database: migration 013 (towing mark and kind of aid to navigation), applied automatically.
+
 ## 1.2.0 — 2026-10-27
 
 Everything from 1.2.0-beta.1 (MQTT and Home Assistant, vessel alerts and summaries, constellation, records, signal and distance, hardening; see below), plus testers' feedback:

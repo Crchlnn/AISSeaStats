@@ -86,6 +86,15 @@ $r['watchlist'] = ['227000001'];
 check('watchlist by MMSI', in_array('watchlist', Rules::tagsFor($v, $r, ['FR' => 50]), true));
 $r['military_prefixes'] = ['2270'];
 check('military prefix', in_array('military', Rules::tagsFor($v, $r, ['FR' => 50]), true));
+// Towboats and pushers declare their convoy's length (1.2.1).
+$r = Rules::defaults();
+$big = ['mmsi' => 366994190, 'name' => 'ANGIE GOLDING', 'shiptype' => 0, 'length_m' => 216, 'country' => 'US', 'vclass' => 'A', 'pusher' => 0];
+check('long vessel is very large', in_array('large', Rules::tagsFor($big, $r, []), true));
+check('pusher seen pushing is not very large', !in_array('large', Rules::tagsFor(['pusher' => 1] + $big, $r, []), true));
+check('towing type is not very large', !in_array('large', Rules::tagsFor(['shiptype' => 32] + $big, $r, []), true)
+    && !in_array('large', Rules::tagsFor(['shiptype' => 52] + $big, $r, []), true));
+check('tows counted when asked', in_array('large', Rules::tagsFor(['pusher' => 1] + $big, ['large_tows' => true] + $r, []), true));
+check('ERI push-tow codes', Ingest::eriIsPusher(8210) && Ingest::eriIsPusher(8400) && !Ingest::eriIsPusher(8010));
 
 // Photo sources: parsing of the documented Wikimedia / Wikidata answers.
 $commons = ['query' => ['pages' => [['imageinfo' => [[
@@ -609,6 +618,33 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     AISSeaStats\PortNames::$fetch = null;
     check('port names cleared', AISSeaStats\PortNames::status()['count'] === 0);
 
+    // 1.2.1: a vessel seen pushing keeps the mark; aids to navigation keep their kind; transmitters by kind.
+    $t121 = $now + 7 * 3600;
+    (new Ingest($t121))->process([
+        ['mmsi' => 366994190, 'type' => 1, 'status' => 12, 'rxuxtime' => $t121, 'lat' => 51.91, 'lon' => 4.40, 'speed' => 5.5],
+        ['mmsi' => 366994191, 'type' => 1, 'status' => 0, 'rxuxtime' => $t121, 'lat' => 51.91, 'lon' => 4.41, 'speed' => 5.5],
+        ['mmsi' => 992271999, 'type' => 21, 'aid_type' => 9, 'name' => 'NORTH CARDINAL', 'rxuxtime' => $t121, 'lat' => 51.93, 'lon' => 4.45],
+        ['mmsi' => 2442999, 'type' => 4, 'rxuxtime' => $t121, 'lat' => 51.95, 'lon' => 4.20],
+    ]);
+    (new Ingest($t121 + 60))->process([['mmsi' => 366994190, 'type' => 1, 'status' => 0, 'rxuxtime' => $t121 + 60, 'lat' => 51.912, 'lon' => 4.40]]);
+    check('pusher mark kept', (int) Db::value('SELECT pusher FROM vessel WHERE mmsi = 366994190') === 1
+        && (int) Db::value('SELECT pusher FROM vessel WHERE mmsi = 366994191') === 0);
+    check('aid type stored', (int) Db::value('SELECT aid_type FROM vessel WHERE mmsi = 992271999') === 9
+        && AISSeaStats\Insights::aidGroup(9) === 'cardinal' && AISSeaStats\Insights::aidGroup(null) === 'unspecified' && AISSeaStats\Insights::aidGroup(31) === 'light_vessel');
+    $txs = AISSeaStats\Insights::transmitters();
+    $pageAll = (int) Db::value("SELECT COUNT(*) FROM vessel WHERE vclass NOT IN ('BASE','ATON')");
+    $total = (int) Db::value('SELECT COUNT(*) FROM vessel');
+    check('transmitters match the page', $txs['vessels'] === $pageAll && $txs['vessels'] + $txs['infra'] === $total
+        && $txs['kinds']['aton']['n'] >= 1 && $txs['kinds']['base']['n'] >= 1 && ($txs['aids']['cardinal'] ?? 0) >= 1
+        && $txs['kinds']['aton']['rows'][0]['aid'] !== null);
+    Db::run('UPDATE vessel SET length_m = 216, shiptype = 0 WHERE mmsi IN (366994190, 366994191)');
+    (new Worker())->updateTags(0);
+    check('tags: pusher not very large', !str_contains((string) Db::value('SELECT tags FROM vessel WHERE mmsi = 366994190'), 'large')
+        && str_contains((string) Db::value('SELECT tags FROM vessel WHERE mmsi = 366994191'), 'large'));
+    $recL = AISSeaStats\Insights::records(Settings::timezone())['largest'];
+    check('records: largest is not a pusher', $recL !== null && $recL['mmsi'] !== 366994190);
+    Db::run('DELETE FROM vessel WHERE mmsi IN (366994190, 366994191, 992271999, 2442999)');
+
     // Vessel alerts and summaries (1.2.0).
     $sent = [];
     Alert::$http = static function (string $url, string $body, array $headers, string $method) use (&$sent): array {
@@ -739,10 +775,16 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
         check('mqtt retained state', str_contains($buf, '"vessels_today"') && str_contains($buf, '"reception"'));
         $disc = MqttPublisher::discovery($mc);
         $one = json_decode((string) reset($disc), true);
+        $rec = json_decode((string) $disc[array_values(array_filter(array_keys($disc), static fn ($k) => str_contains($k, '/range_record/')))[0]], true);
+        check('mqtt range record statistics', ($rec['state_class'] ?? '') === 'measurement');
         check('mqtt discovery', count($disc) === 9 && str_starts_with((string) key($disc), 'homeassistant/sensor/aisseastats_')
-            && ($one['availability_topic'] ?? '') === MqttPublisher::base($mc) . '/availability' && ($one['expire_after'] ?? 0) === 600);
+            && ($one['availability_topic'] ?? '') === MqttPublisher::base($mc) . '/availability' && ($one['expire_after'] ?? 0) === 180);
+        $disc2 = MqttPublisher::discovery(['expire_after' => 90] + $mc);
+        check('mqtt expire setting', (json_decode((string) reset($disc2), true)['expire_after'] ?? 0) === 90);
+        $pub->shutdown(); // worker stopping (1.2.1)
+        check('mqtt shutdown', MqttPublisher::test($mc) === null);
         Settings::set('mqtt', ['enabled' => false]);
-        $pub->tick(time()); // goes offline cleanly
+        $pub->tick(time());
         MqttPublisher::$current = null;
     }
     check('mqtt topic rules', Mqtt::validTopic('a/b-c') && !Mqtt::validTopic('a/#') && !Mqtt::validTopic('a/+/b') && !Mqtt::validTopic('')
@@ -750,6 +792,9 @@ check('flag from MMSI when not sent', $v['country'] === 'NL');
     $badHost = false;
     try { MqttPublisher::fromForm(['mqtt_enabled' => '1', 'mqtt_host' => 'evil host;'], MqttPublisher::defaults()); } catch (InvalidArgumentException $e) { $badHost = $e->getMessage() === 'mqtt_host'; }
     $kept = MqttPublisher::fromForm(['mqtt_host' => 'broker.lan', 'mqtt_pass' => ''], ['pass' => 'secret'] + MqttPublisher::defaults());
+    check('mqtt expire form', $kept['expire_after'] === 180
+        && MqttPublisher::fromForm(['mqtt_host' => 'b', 'mqtt_expire' => '20'], MqttPublisher::defaults())['expire_after'] === 60
+        && MqttPublisher::fromForm(['mqtt_host' => 'b', 'mqtt_expire' => '300'], MqttPublisher::defaults())['expire_after'] === 300);
     check('mqtt form', $badHost && $kept['pass'] === 'secret' && $kept['port'] === 1883
         && MqttPublisher::fromForm(['mqtt_host' => 'b', 'mqtt_tls' => '1', 'mqtt_pass_clear' => '1'], ['pass' => 's'] + MqttPublisher::defaults())['port'] === 8883
         && MqttPublisher::fromForm(['mqtt_host' => 'b', 'mqtt_pass_clear' => '1'], ['pass' => 's'] + MqttPublisher::defaults())['pass'] === '');

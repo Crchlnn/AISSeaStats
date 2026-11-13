@@ -213,6 +213,7 @@ Newest first. Details, fixes and database changes for each version: [CHANGELOG.m
 
 | Version | Date | What's new |
 |---|---|---|
+| 1.2.1 | 2026-11-13 | Towboats and pushers no longer tagged "very large" (they declare the length of their convoy); known vessels in the admin match the page, with every transmitter by kind (base stations, aids to navigation by type…); Home Assistant: worker says "offline" when stopped, "unavailable" delay set in the admin (3 min by default), long-term statistics for the range record; dashboard example by @Phil353556 |
 | 1.2.0 | 2026-10-27 | Release of the 1.2.0 features, with testers' feedback: clickable tags to filter interesting vessels (issue #4), zoom in the constellation, UN/LOCODE port names on demand (NLRTM → Rotterdam), "FOR ORDERS" no longer a destination, plausible speeds only in the records, dark theme buttons readable, `bin/reset-admin.php` and Mosquitto set-up documented (issue #5) |
 | 1.2.0-beta.1 | 2026-10-23 | Test version. Home Assistant sensors through MQTT; vessel alerts (watch list, military, distress, range record…) and daily or weekly summaries on ntfy, Telegram, webhook, e-mail or MQTT, with quiet hours and channels per kind; constellation of destinations and ports network; records; signal and distance; public address for links in alerts; hardening (database time limit on the public API, image checks, end-to-end test of the Docker stack, [Exposing to the Internet](#exposing-to-the-internet)) |
 | 1.1.6 | 2026-10-21 | Security review fixes: login attempts limited, one-time setup code, photo look-ups only for received vessels, refused ingest posts no longer logged, strict `INGEST_ALLOW`, worker without root, option to round the published position, admin session timeout |
@@ -266,6 +267,10 @@ Run the `docker compose` commands from the folder you installed from (the one wi
 
 `http://<pi-address>:8095/admin.php`: ingestion health, station settings (including the optional public address of the page), alerts, MQTT and Home Assistant, vessel alerts and summaries, rules for interesting vessels, named zones for routes, destination dictionary, vessel photos, token rotation, password, deletion of one vessel's data or of everything.
 
+**Very large vessels and tows.** A towboat or pusher often declares the length of its whole convoy (a 15 m boat pushing barges sends 250 m). Since 1.2.1 it is not tagged *very large*, nor taken for the largest vessel in the records: AIS types 31, 32 and 52, inland push-tow and pusher codes, and any vessel seen with the navigational status "towing" or "pushing ahead". The rule has an option to count them anyway.
+
+**Known vessels** in the admin is the same figure as *all time* on the page. Click it to see every transmitter the station heard, by kind: class A and B vessels, search and rescue aircraft, distress beacons, and the base stations and aids to navigation (lighthouses, buoys…) that the page leaves out, with the aids by type (lights, cardinal and lateral marks…; recorded since 1.2.1).
+
 **Military vessels.** No MMSI block is reserved for warships: each country assigns their numbers (usually in its normal range), and many do not transmit, or transmit with AIS type 35. The rule tags type 35 and the MMSI prefixes you list in the admin (known prefixes of your area).
 
 **Named zones** make routes readable. By default a route goes from one compass sector around the station to another (`South-West → North-East`; `West → West` for vessels that came and left on the same side, often moored or at anchor). Add zones such as a lock, a port or a town and routes become `Harbour → North lock`. Existing passages are recomputed when zones change.
@@ -312,9 +317,15 @@ With discovery on (default), an **AISSeaStats** device appears in Home Assistant
 | Topic | Content |
 | --- | --- |
 | `aisseastats/<station>/state` | JSON of all values, retained |
-| `aisseastats/<station>/availability` | `online` / `offline`; the server publishes `offline` itself if the worker stops (last will) |
+| `aisseastats/<station>/availability` | `online` / `offline`; the worker publishes `offline` when it is stopped (`docker compose stop`, restart, update), and the server publishes it for the worker if it dies or the Pi goes offline (last will) |
 | `aisseastats/<station>/event` | alerts and summaries routed to MQTT (QoS 1, not retained) |
 | `homeassistant/…/aisseastats_<id>/…/config` | discovery, retained, refreshed hourly |
+
+Without a new value for 3 minutes (setting "Unavailable after", 60 to 3,600 s), Home Assistant shows the sensors as unavailable. The range record has long-term statistics, so its curve can be kept for months. Only the `worker` container talks to MQTT: stopping the `app` container (web page and ingestion) changes nothing in Home Assistant at first, then *Reception* turns off and *Last message* grows, since no AIS data arrives any more.
+
+![Home Assistant dashboard built from the AISSeaStats sensors: reception, last message, active vessels, today's range, today's figures, 24 h history](docs/screenshots/home-assistant.png)
+
+*Home Assistant dashboard by [@Phil353556](https://github.com/Phil353556).*
 
 No message is published per vessel. `<station>` is the station name in lower case (letters, digits and dashes); the prefixes can be changed. Example automation: trigger on `mqtt` topic `aisseastats/+/event`, condition `{{ trigger.payload_json.kind == 'vessel' }}`, then a notification with `{{ trigger.payload_json.title }}`.
 

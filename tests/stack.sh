@@ -32,7 +32,7 @@ ok "processes run as www-data"
 
 # PHP extensions in the real image.
 # shellcheck disable=SC2016 # PHP code, $e must not be expanded by the shell
-dc exec -T app php -r 'foreach (["mbstring","pdo_mysql","json","zlib","Zend OPcache"] as $e) { if (!extension_loaded($e)) { echo $e; exit(1); } }' \
+dc exec -T app php -r 'foreach (["mbstring","pdo_mysql","json","zlib","Zend OPcache","pcntl"] as $e) { if (!extension_loaded($e)) { echo $e; exit(1); } }' \
   || fail "PHP extension missing in the image"
 ok "PHP extensions"
 

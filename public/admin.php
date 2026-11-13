@@ -11,6 +11,7 @@ use AISSeaStats\Debug;
 use AISSeaStats\DebugLog;
 use AISSeaStats\Destinations;
 use AISSeaStats\I18n;
+use AISSeaStats\Insights;
 use AISSeaStats\LoginGuard;
 use AISSeaStats\MqttPublisher;
 use AISSeaStats\Notify;
@@ -155,6 +156,7 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 }
                 $r['yacht_min_len'] = max(5, min(200, (int) ($_POST['yacht_min_len'] ?? 24)));
                 $r['large_min_len'] = max(20, min(500, (int) ($_POST['large_min_len'] ?? 200)));
+                $r['large_tows'] = isset($_POST['large_tows']);
                 $r['rare_flag_max'] = max(1, min(50, (int) ($_POST['rare_flag_max'] ?? 3)));
                 $r['rare_flag_min_fleet'] = max(0, min(100000, (int) ($_POST['rare_flag_min_fleet'] ?? 100)));
                 $r['military_prefixes'] = split_list((string) ($_POST['military_prefixes'] ?? ''), '/^\d{3,9}$/');
@@ -306,6 +308,7 @@ if ($action !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                         'port' => (int) ($_POST['mqtt_port'] ?? 1883), 'tls' => isset($_POST['mqtt_tls']), 'tls_verify' => isset($_POST['mqtt_tls_verify']),
                         'user' => (string) ($_POST['mqtt_user'] ?? ''), 'prefix' => (string) ($_POST['mqtt_prefix'] ?? ''),
                         'discovery' => isset($_POST['mqtt_discovery']), 'discovery_prefix' => (string) ($_POST['mqtt_discovery_prefix'] ?? ''),
+                        'expire_after' => (int) ($_POST['mqtt_expire'] ?? MqttPublisher::EXPIRE_DEFAULT_S),
                     ], MqttPublisher::defaults()));
                     throw new InvalidArgumentException(I18n::t('admin.alert_invalid', ['f' => I18n::t('admin.mqtt_f_' . $e->getMessage())]));
                 }
@@ -406,7 +409,9 @@ $dbSize = (int) Db::value('SELECT COALESCE(SUM(data_length + index_length), 0) F
 // MariaDB's redo log has a fixed size (96 MB by default) and explains most of the Docker volume's size.
 $redoLog = (int) (Db::value('SELECT @@innodb_log_file_size') ?? 0);
 $mb = static fn (int $bytes): string => I18n::t('unit.mb', ['n' => number_format($bytes / 1048576, $bytes < 10485760 ? 1 : 0, ',', "\u{202F}")]);
-$counts = Db::one("SELECT (SELECT COUNT(*) FROM vessel) vessels, (SELECT COUNT(*) FROM position) positions, (SELECT COUNT(*) FROM passage) passages");
+$counts = Db::one("SELECT (SELECT COUNT(*) FROM position) positions, (SELECT COUNT(*) FROM passage) passages");
+// 1.2.1: the same vessel count as the public page; base stations and aids to navigation apart, detailed in a dialog.
+$tx = Insights::transmitters();
 $zones = Db::all('SELECT * FROM zone ORDER BY name');
 $destDict = Destinations::dictionary();
 $destMap = Destinations::map($destDict);
@@ -460,7 +465,8 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
     <div><?= $t('admin.avg_ms') ?><b><?= (int) $hour['ms'] ?> ms</b></div>
     <div><?= $t('admin.worker') ?><b><?= Web::e($heartbeat ? $ago($heartbeat) : I18n::t('admin.never')) ?></b></div>
     <div><?= $t('admin.db_size') ?><b><?= Web::e($mb($dbSize)) ?></b></div>
-    <div><?= $t('admin.vessels') ?><b><?= number_format((int) $counts['vessels'], 0, ',', ' ') ?></b></div>
+    <div><button type="button" class="health-btn" data-open="tx-dialog" aria-haspopup="dialog"><?= $t('admin.vessels') ?><b><?= number_format($tx['vessels'], 0, ',', ' ') ?></b>
+      <?php if ($tx['infra'] > 0): ?><span class="sub"><?= $t('admin.tx_plus', ['n' => number_format($tx['infra'], 0, ',', ' ')]) ?></span><?php endif; ?></button></div>
     <div><?= $t('admin.positions') ?><b><?= number_format((int) $counts['positions'], 0, ',', ' ') ?></b></div>
   </div>
   <p class="muted small"><?= $t('admin.db_size_help', ['log' => $mb($redoLog)]) ?></p>
@@ -671,6 +677,9 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
         <input id="mqtt_discovery_prefix" name="mqtt_discovery_prefix" maxlength="60" value="<?= Web::e((string) $mc['discovery_prefix']) ?>"></div>
     </div>
     <label class="check"><input type="checkbox" name="mqtt_discovery"<?= $mc['discovery'] ? ' checked' : '' ?>> <?= $t('admin.mqtt_discovery') ?></label>
+    <div class="field"><label for="mqtt_expire"><?= $t('admin.mqtt_expire') ?></label>
+      <input id="mqtt_expire" name="mqtt_expire" type="number" min="60" max="3600" step="10" value="<?= (int) ($mc['expire_after'] ?? MqttPublisher::EXPIRE_DEFAULT_S) ?>">
+      <span class="help"><?= $t('admin.mqtt_expire_help') ?></span></div>
     <p class="help muted small"><?= $t('admin.mqtt_topics') ?></p>
     <p><button class="btn" type="submit"><?= $t('admin.save') ?></button>
       <button class="btn secondary" type="submit" name="test" value="1"><?= $t('admin.alert_test') ?></button></p>
@@ -763,6 +772,7 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
     <label class="check"><input type="checkbox" name="rule_yacht"<?= $r['yacht'] ? ' checked' : '' ?>> <?= $t('tag.yacht') ?> — <?= $t('admin.rule_yacht') ?></label>
     <label class="check"><input type="checkbox" name="rule_hazmat"<?= $r['hazmat'] ? ' checked' : '' ?>> <?= $t('tag.hazmat') ?> — <?= $t('admin.rule_hazmat') ?></label>
     <label class="check"><input type="checkbox" name="rule_large"<?= $r['large'] ? ' checked' : '' ?>> <?= $t('tag.large') ?> — <?= $t('admin.rule_large') ?></label>
+    <label class="check sub-check"><input type="checkbox" name="large_tows"<?= !empty($r['large_tows']) ? ' checked' : '' ?>> <?= $t('admin.rule_large_tows') ?></label>
     <label class="check"><input type="checkbox" name="rule_rare_flag"<?= $r['rare_flag'] ? ' checked' : '' ?>> <?= $t('tag.rare_flag') ?> — <?= $t('admin.rule_rare') ?></label>
     <div class="row">
       <div class="field"><label for="yacht_min_len"><?= $t('admin.yacht_len') ?></label>
@@ -986,5 +996,40 @@ foreach (in_array($action, ['alerts', 'mqtt', 'notify'], true) || str_starts_wit
     <p><button class="btn danger" type="submit"><?= $t('admin.reset_btn') ?></button></p>
   </form>
 </section>
+<?php
+?>
+<dialog id="tx-dialog" class="vessel-dialog" aria-labelledby="tx-title">
+  <div class="vd-inner">
+    <div class="vd-head"><div><h2 id="tx-title"><?= $t('admin.tx_title') ?></h2>
+      <p class="muted small"><?= $t('admin.tx_help') ?></p></div>
+      <button type="button" class="icon-btn" data-close="tx-dialog" aria-label="<?= $t('vessel.close') ?>">✕</button></div>
+    <table class="table tx-table"><tbody>
+      <?php foreach (Insights::TX_KINDS as $kind): $k = $tx['kinds'][$kind]; if ($k['n'] === 0) { continue; } ?>
+        <tr><td><?= $t('admin.tx_' . $kind) ?><?php if (in_array($kind, ['base', 'aton'], true)): ?> <span class="type"><?= $t('admin.tx_not_counted') ?></span><?php endif; ?></td>
+          <td class="r"><?= number_format($k['n'], 0, ',', ' ') ?></td></tr>
+      <?php endforeach; ?>
+      <tr class="tx-total"><td><?= $t('admin.tx_page') ?></td><td class="r"><?= number_format($tx['vessels'], 0, ',', ' ') ?></td></tr>
+      <tr class="tx-total"><td><?= $t('admin.tx_all') ?></td><td class="r"><?= number_format($tx['vessels'] + $tx['infra'], 0, ',', ' ') ?></td></tr>
+    </tbody></table>
+    <?php if ($tx['aids'] !== []): ?>
+      <h3 class="sub"><?= $t('admin.tx_aids') ?></h3>
+      <div class="chips"><?php foreach ($tx['aids'] as $g => $n): ?><span class="chip"><?= $t('aid.' . $g) ?> <span class="n"><?= number_format($n, 0, ',', ' ') ?></span></span><?php endforeach; ?></div>
+      <?php if (isset($tx['aids']['unspecified'])): ?><p class="muted small"><?= $t('admin.tx_aids_help') ?></p><?php endif; ?>
+    <?php endif; ?>
+    <?php foreach (Insights::TX_KINDS as $kind): $k = $tx['kinds'][$kind]; if ($k['n'] === 0 || $kind === 'class_a' || $kind === 'class_b') { continue; } ?>
+      <details class="tx-list"><summary><?= $t('admin.tx_' . $kind) ?> (<?= number_format($k['n'], 0, ',', ' ') ?>)</summary>
+        <table class="table"><tbody>
+          <?php foreach ($k['rows'] as $row): ?>
+            <tr><td><?= ($row['name'] ?? '') !== '' ? Web::e((string) $row['name']) : '<span class="muted">–</span>' ?><?php if ($row['aid'] !== null): ?> <span class="type"><?= $t('aid.' . $row['aid']) ?></span><?php endif; ?>
+                <span class="type">MMSI <?= (int) $row['mmsi'] ?><?= $row['country'] ? ' · ' . Web::e((string) $row['country']) : '' ?></span></td>
+              <td class="r"><?= $row['dist'] !== null ? Web::e(number_format((float) $row['dist'], 1, ',', ' ')) . ' NM' : '–' ?></td>
+              <td class="r"><?= Web::e($ago((int) $row['last_seen'])) ?></td></tr>
+          <?php endforeach; ?>
+        </tbody></table>
+        <?php if ($k['n'] > count($k['rows'])): ?><p class="muted small"><?= $t('admin.tx_more', ['n' => count($k['rows'])]) ?></p><?php endif; ?>
+      </details>
+    <?php endforeach; ?>
+  </div>
+</dialog>
 <?php
 Page::close(['assets/vendor/leaflet/leaflet.js', 'assets/admin.js']);

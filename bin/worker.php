@@ -41,4 +41,5 @@ do {
         sleep(1);
     }
 } while (!$stop);
+$worker->shutdown();
 echo "[aisseastats] worker stopped\n";

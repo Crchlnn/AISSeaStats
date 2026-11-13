@@ -2,6 +2,22 @@
 
 Version anglaise : [CHANGELOG.md](../CHANGELOG.md).
 
+## 1.2.1 — 13/11/2026
+
+Améliorations issues des retours des utilisateurs (Discord, GitHub, utilisateurs de Home Assistant).
+
+Corrections
+- Étiquette « très grand » : les pousseurs et remorqueurs déclarent la longueur de tout leur convoi (un bateau de 15 m qui pousse des barges envoie 250 m, exemple ANGIE GOLDING, MMSI 366994190). Ils n'ont plus l'étiquette « très grand » et ne sont plus pris pour le plus grand navire des records : types AIS 31, 32 et 52, codes ERI fluviaux de convois poussés et de pousseurs, et navires vus avec le statut de navigation 11 ou 12 (remorquage, poussage). Option dans les règles pour les compter quand même. Les étiquettes sont recalculées au démarrage du worker
+- Admin, navires connus : même chiffre que « depuis le début » sur la page (les stations de base et aides à la navigation n'étaient comptées que dans l'admin, d'où 3 713 contre 3 596 sur une station)
+
+Nouveautés
+- Admin : un clic sur « Navires connus » détaille tous les émetteurs par catégorie (classe A, classe B, aéronefs SAR, balises de détresse, stations de base, aides à la navigation, classe pas encore connue), le total de la page et le total complet, les aides à la navigation par type (feux, marques cardinales, latérales, danger isolé, eaux saines, marques spéciales…) et la liste de chaque catégorie avec distance et dernier message
+- Home Assistant : le worker publie « offline » et se déconnecte quand on l'arrête (docker stop, redémarrage, mise à jour), sans attendre le « last will » du serveur ; l'image contient pour cela l'extension PHP pcntl (vérifiée à la construction)
+- Home Assistant : réglage « Indisponible après » (60 à 3 600 s, 3 minutes par défaut au lieu de 10) ; le record de portée a `state_class: measurement` (statistiques à long terme). Merci aux utilisateurs de Home Assistant qui ont testé les deux
+- Documentation : exemple de tableau de bord Home Assistant par @Phil353556 ; effet de l'arrêt du conteneur `app` ou `worker` dans Home Assistant
+
+Base de données : migration 013 (marque de remorquage et type d'aide à la navigation), appliquée automatiquement.
+
 ## 1.2.0 — 27/10/2026
 
 Tout le contenu de la 1.2.0-beta.1 (MQTT et Home Assistant, alertes navires et résumés, constellation, records, signal et distance, durcissement ; voir plus bas), plus les retours des testeurs :

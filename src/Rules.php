@@ -24,6 +24,7 @@ final class Rules
             'hazmat' => true,
             'large' => true,
             'large_min_len' => 200,
+            'large_tows' => false,
             'rare_flag' => true,
             'rare_flag_max' => 3,
             'rare_flag_min_fleet' => 100,
@@ -69,7 +70,10 @@ final class Rules
         if ($r['hazmat'] && (($type >= 71 && $type <= 74) || ($type >= 81 && $type <= 84))) {
             $tags[] = 'hazmat';
         }
-        if ($r['large'] && $len >= (int) $r['large_min_len']) {
+        // A towboat or pusher declares the length of its convoy (a 15 m boat pushing barges sends 250 m): not
+        // "very large" unless the admin wants convoys counted (1.2.1).
+        $tow = in_array($type, [31, 32, 52], true) || !empty($v['pusher']);
+        if ($r['large'] && $len >= (int) $r['large_min_len'] && (!$tow || !empty($r['large_tows']))) {
             $tags[] = 'large';
         }
         $fleet = array_sum($flagCounts);

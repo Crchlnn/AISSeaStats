@@ -280,7 +280,7 @@ final class Ingest
                 'msgs' => 0, 'passages' => 0, 'max_dist_nm' => null, 'max_speed_kn' => null,
                 'last_lat' => null, 'last_lon' => null, 'last_pos_ts' => null, 'last_sog' => null,
                 'last_cog' => null, 'last_signal' => null, 'cur_passage_id' => null, 'static_updated' => 0,
-                '_new' => true,
+                'pusher' => 0, 'aid_type' => null, '_new' => true,
             ];
         }
         $v = &$this->vessels[$mmsi];
@@ -358,6 +358,12 @@ final class Ingest
             $this->handlePosition($mmsi, $v, $m, $ts, $type, $hour, $day, $pid, $infra);
         }
         $this->handleStatic($v, $m, $type, $ts);
+        // 1.2.1: a vessel seen pushing ahead or towing (navigational status 11 or 12) keeps that mark: alone, it
+        // declares its own length; with barges, often the length of the whole convoy.
+        if (in_array($type, [1, 2, 3], true) && isset($m['status']) && is_numeric($m['status'])
+            && in_array((int) $m['status'], [11, 12], true)) {
+            $v['pusher'] = 1;
+        }
         unset($v);
     }
 
@@ -506,6 +512,10 @@ final class Ingest
         if ($type === 5 || $type === 19 || $type === 21 || ($isB24 && $part === 0)) {
             $set('name', $name);
         }
+        // Kind of aid to navigation (1.2.1): light, cardinal mark, virtual aid…
+        if ($type === 21 && isset($m['aid_type']) && is_numeric($m['aid_type']) && (int) $m['aid_type'] >= 0 && (int) $m['aid_type'] <= 31) {
+            $set('aid_type', (int) $m['aid_type']);
+        }
         if ($type === 5 || ($isB24 && $part === 1)) {
             $set('callsign', self::cleanText($m['callsign'] ?? null, 16));
         }
@@ -564,6 +574,10 @@ final class Ingest
             if (empty($v['shiptype']) && isset($m['shiptype']) && is_numeric($m['shiptype'])) {
                 $set('shiptype', self::eriToAis((int) $m['shiptype']));
             }
+            // Push-tows and pushers (1.2.1): the declared length is often the convoy's.
+            if (isset($m['shiptype']) && is_numeric($m['shiptype']) && self::eriIsPusher((int) $m['shiptype'])) {
+                $set('pusher', 1);
+            }
         }
         if ($changed) {
             $v['static_updated'] = $ts;
@@ -573,6 +587,12 @@ final class Ingest
     /**
      * ERI inland ship type (CCNR / UNECE, 4 digits) to the closest AIS ship type, grouped as AIS-catcher does.
      */
+    /** ERI codes of push-tows (convoys) and of tugs and push boats. */
+    public static function eriIsPusher(int $eri): bool
+    {
+        return ($eri >= 8210 && $eri <= 8390) || in_array($eri, [8400, 8410, 8420, 8430], true);
+    }
+
     public static function eriToAis(int $eri): ?int
     {
         return match (true) {
@@ -626,12 +646,13 @@ final class Ingest
                 $v['first_seen'], $v['last_seen'], $v['msgs'], $v['passages'], $v['max_dist_nm'],
                 $v['max_speed_kn'], $v['last_lat'], $v['last_lon'], $v['last_pos_ts'], $v['last_sog'],
                 $v['last_cog'], $v['last_signal'], $v['cur_passage_id'], $v['static_updated'],
+                (int) ($v['pusher'] ?? 0), $v['aid_type'] ?? null,
             ];
         }
         $cols = ['mmsi', 'name', 'callsign', 'imo', 'eni', 'shiptype', 'vclass', 'length_m', 'beam_m', 'draught_m',
             'country', 'destination', 'eta', 'first_seen', 'last_seen', 'msgs', 'passages', 'max_dist_nm',
             'max_speed_kn', 'last_lat', 'last_lon', 'last_pos_ts', 'last_sog', 'last_cog', 'last_signal',
-            'cur_passage_id', 'static_updated'];
+            'cur_passage_id', 'static_updated', 'pusher', 'aid_type'];
         $upd = implode(', ', array_map(static fn ($c) => "$c = VALUES($c)", array_slice($cols, 1)));
         self::bulk('INSERT INTO vessel (' . implode(',', $cols) . ') VALUES %s ON DUPLICATE KEY UPDATE ' . $upd, $vrows);
 

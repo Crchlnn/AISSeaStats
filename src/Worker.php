@@ -15,6 +15,16 @@ final class Worker
     private int $lastTags = 0;
     private ?MqttPublisher $mqtt = null;
 
+    /** Worker stopping: MQTT says "offline" itself (1.2.1). */
+    public function shutdown(): void
+    {
+        try {
+            $this->mqtt?->shutdown();
+        } catch (\Throwable $e) {
+            error_log('[aisseastats] mqtt: ' . $e->getMessage());
+        }
+    }
+
     public function tick(?int $now = null): void
     {
         $now ??= time();
@@ -166,7 +176,7 @@ final class Worker
         $changed = 0;
         $last = -1;
         while (true) {
-            $rows = Db::all("SELECT mmsi, name, shiptype, length_m, country, vclass, tags FROM vessel
+            $rows = Db::all("SELECT mmsi, name, shiptype, length_m, country, vclass, tags, pusher FROM vessel
                              WHERE last_seen >= ? AND mmsi > ? AND vclass NOT IN ('BASE', 'ATON')
                              ORDER BY mmsi LIMIT 2000", [max(0, $since), $last]);
             if ($rows === []) {

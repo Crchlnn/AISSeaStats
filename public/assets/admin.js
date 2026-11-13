@@ -8,6 +8,20 @@
     });
   });
 
+  // Dialogs of the admin page (1.2.1: transmitters by kind).
+  Array.prototype.forEach.call(document.querySelectorAll('[data-open]'), function (b) {
+    b.addEventListener('click', function () {
+      var d = document.getElementById(b.getAttribute('data-open'));
+      if (d && !d.open) { d.showModal(); }
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
+    b.addEventListener('click', function () { document.getElementById(b.getAttribute('data-close')).close(); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('dialog'), function (d) {
+    d.addEventListener('click', function (e) { if (e.target === d) { d.close(); } }); // click on the backdrop
+  });
+
   // Leaflet tooltips take HTML: zone names are escaped (1.1.6).
   function escHtml(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
